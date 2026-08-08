@@ -152,6 +152,7 @@ export function App() {
     const videos = videoRefs.current;
     if (!stage || videos.length !== 3 || videos.some((video) => !video)) return;
 
+    resizingRef.current = false;
     setReady(false);
     let targetProgress = 0;
     let renderProgress = 0;
@@ -317,6 +318,7 @@ export function App() {
 
     return () => {
       destroyed = true;
+      resizingRef.current = false;
       cancelAnimationFrame(frameId);
       cancelAnimationFrame(resizeFrameId);
       window.removeEventListener("scroll", updateTarget);
