@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="laser" x1="10" y1="52" x2="54" y2="12" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#17E7FF"/>
+      <stop offset=".52" stop-color="#F3F4F7"/>
+      <stop offset="1" stop-color="#FF3BC8"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#030307"/>
+  <path d="M11 51 31.7 10 53 51M20.5 39.5h22.8" fill="none" stroke="url(#laser)" stroke-width="7" stroke-linecap="square" stroke-linejoin="miter" filter="url(#glow)"/>
+  <path d="M31.8 10 36 18.4 28 18.6Z" fill="#F3F4F7"/>
+</svg>

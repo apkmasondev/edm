@@ -1,0 +1,39 @@
+/node_modules/
+/dist/
+/.sites_seed/
+/.openai/
+/app/
+/build/
+/db/
+/drizzle/
+/worker/
+/masters/
+/video/
+/reference/
+/prompts/
+/next-env.d.ts
+/next.config.ts
+/drizzle.config.ts
+*.log
+qa-*.png
+
+# Local notes and source-package instructions
+PLAN.md
+CONTENT.md
+MANIFEST.txt
+AGENT_PROMPT.txt
+README.md
+
+# Secrets and machine-specific files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+
+# Superseded source assets (not used by the production experience)
+public/reference/02_transition_frame.png
+public/reference/03_finale_poster.png
+
+# Obsolete starter test
+tests/rendered-html.test.mjs
