@@ -375,7 +375,11 @@ export function App() {
             <span className="brand-mark">A</span>
             <div><strong>APKMASON</strong><span>EDM / 2027</span></div>
           </div>
-          <span className="fiction-pill">DESIGN FICTION</span>
+          <span className="fiction-pill" aria-label="Design fiction festival credential">
+            <small>ACCESS // 27</small>
+            <strong>DESIGN FICTION</strong>
+            <i aria-hidden="true" />
+          </span>
           <button
             className="sound-toggle"
             type="button"
@@ -384,14 +388,14 @@ export function App() {
             data-active={soundOn}
             onClick={toggleSound}
           >
-            <i /><span>SOUND</span><b>{soundOn ? "ON" : "OFF"}</b>
+            <i aria-hidden="true" /><span>SOUND</span><b>{soundOn ? "ON" : "OFF"}</b>
           </button>
         </header>
 
         <div className="copy-safe-area">
           <section className="copy-beat copy-beat--intro" data-beat data-start="0.025" data-end="0.08">
             <p className="eyebrow">APKMASON PRESENTS</p>
-            <h1>EDM MUSIC<br />FESTIVAL</h1>
+            <h1>EDM <span className="rgb-glitch" data-text="MUSIC">MUSIC</span><br />FESTIVAL</h1>
             <p className="meta">NOVA DISTRICT / 22 AUG 2027</p>
             <p className="fiction-note">A FICTIONAL LIVE EXPERIENCE</p>
           </section>
@@ -438,7 +442,7 @@ export function App() {
           </section>
           <section className="copy-beat finale" data-beat data-start="0.91" data-end="1" data-hold="true">
             <p className="eyebrow">APKMASON</p>
-            <h2>EDM MUSIC<br />FESTIVAL</h2>
+            <h2>EDM <span className="rgb-glitch" data-text="MUSIC">MUSIC</span><br />FESTIVAL</h2>
             <p className="meta">22 AUG 2027 — NOVA DISTRICT</p>
             <p className="final-tagline">BEYOND THE DROP.</p>
             <div className="finale-actions">
