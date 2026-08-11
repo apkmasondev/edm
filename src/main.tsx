@@ -220,14 +220,25 @@ export function App() {
     let compactLineup = window.matchMedia("(max-width: 700px)").matches;
     let activeStageChip = -1;
     let lastLineupTransform = "";
+    let lastMotionBlur = -1;
     const lastSeekAt = [0, 0, 0];
     const warmed = [false, false, false];
+    const queuedSeekTimes: Array<number | null> = [null, null, null];
+    const seekInFlight = [false, false, false];
+    const frameCallbackIds: Array<number | null> = [null, null, null];
+    const frameGateTimeouts: Array<number | null> = [null, null, null];
     const warmupTimeouts = new Set<number>();
     const metadataListeners: Array<[HTMLVideoElement, () => void]> = [];
     const seekListeners: Array<[HTMLVideoElement, () => void]> = [];
     const beatElements = Array.from(stage.querySelectorAll<HTMLElement>("[data-beat]"));
     const stageChips = Array.from(stage.querySelectorAll<HTMLElement>("[data-stage-chip]"));
     const lineup = stage.querySelector<HTMLElement>("[data-lineup-track]");
+    const supportsFrameCallbacks = videos.map((video) => (
+      Boolean(video && typeof video.requestVideoFrameCallback === "function")
+    ));
+    const allowMotionBlur = !mobileAssets && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    stage.dataset.frameSync = supportsFrameCallbacks.every(Boolean) ? "video-frame" : "raf";
+    stage.dataset.motionBlur = String(allowMotionBlur);
     let readyDelayId: number | null = null;
     const readyFallbackId = window.setTimeout(() => {
       if (!destroyed) setReady(true);
@@ -256,20 +267,67 @@ export function App() {
       });
     };
 
+    const releaseFrameGate = (video: HTMLVideoElement, index: number, cancelCallback: boolean) => {
+      const callbackId = frameCallbackIds[index];
+      if (cancelCallback && callbackId !== null) {
+        try { video.cancelVideoFrameCallback(callbackId); } catch { /* Callback may already be completing. */ }
+      }
+      frameCallbackIds[index] = null;
+
+      const timeoutId = frameGateTimeouts[index];
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      frameGateTimeouts[index] = null;
+      seekInFlight[index] = false;
+    };
+
+    const flushVideoSeek = (video: HTMLVideoElement, index: number, now: number) => {
+      const desired = queuedSeekTimes[index];
+      if (desired === null || seekInFlight[index] || destroyed) return;
+      queuedSeekTimes[index] = null;
+
+      const difference = desired - video.currentTime;
+      if (Math.abs(difference) < 1 / 120) return;
+
+      if (!supportsFrameCallbacks[index]) {
+        if (video.seeking && now - lastSeekAt[index] < 32) {
+          queuedSeekTimes[index] = desired;
+          return;
+        }
+        try {
+          video.currentTime = desired;
+          lastSeekAt[index] = now;
+        } catch { /* Source can briefly be unavailable while switching resolution. */ }
+        return;
+      }
+
+      try {
+        seekInFlight[index] = true;
+        video.currentTime = desired;
+        lastSeekAt[index] = now;
+        const callbackId = video.requestVideoFrameCallback(() => {
+          if (frameCallbackIds[index] !== callbackId) return;
+          releaseFrameGate(video, index, false);
+          flushVideoSeek(video, index, performance.now());
+        });
+        frameCallbackIds[index] = callbackId;
+        frameGateTimeouts[index] = window.setTimeout(() => {
+          if (frameCallbackIds[index] !== callbackId) return;
+          releaseFrameGate(video, index, true);
+          flushVideoSeek(video, index, performance.now());
+        }, 120);
+      } catch {
+        releaseFrameGate(video, index, true);
+      }
+    };
+
     const seekVideos = (progress: number, now: number) => {
       videos.forEach((video, index) => {
         if (!video || video.readyState < 1 || !Number.isFinite(video.duration)) return;
         const [start, end] = SEGMENTS[index];
         const local = clamp((progress - start) / (end - start));
         const desired = Math.min(video.duration - 1 / 48, Math.max(0, local * video.duration));
-        const difference = desired - video.currentTime;
-        if (Math.abs(difference) < 1 / 120) return;
-        if (video.seeking && now - lastSeekAt[index] < 32) return;
-
-        try {
-          video.currentTime = desired;
-          lastSeekAt[index] = now;
-        } catch { /* Source can briefly be unavailable while switching resolution. */ }
+        queuedSeekTimes[index] = desired;
+        flushVideoSeek(video, index, now);
       });
     };
 
@@ -327,6 +385,13 @@ export function App() {
       if (Math.abs(targetProgress - renderProgress) < 0.00001 && Math.abs(renderVelocity) < 0.0001) {
         renderProgress = targetProgress;
         renderVelocity = 0;
+      }
+      const motionBlur = allowMotionBlur
+        ? clamp((Math.abs(renderVelocity) - 0.015) * 0.9, 0, 0.36)
+        : 0;
+      if ((motionBlur === 0 && lastMotionBlur !== 0) || Math.abs(motionBlur - lastMotionBlur) >= 0.004) {
+        lastMotionBlur = motionBlur;
+        stage.style.setProperty("--motion-blur", `${motionBlur.toFixed(3)}px`);
       }
       renderFrame(renderProgress, now);
       frameId = requestAnimationFrame(tick);
@@ -431,12 +496,19 @@ export function App() {
       warmupTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
       metadataListeners.forEach(([video, listener]) => video.removeEventListener("loadedmetadata", listener));
       seekListeners.forEach(([video, listener]) => video.removeEventListener("seeked", listener));
+      videos.forEach((video, index) => {
+        if (video) releaseFrameGate(video, index, true);
+        queuedSeekTimes[index] = null;
+      });
       cancelAnimationFrame(frameId);
       if (resizeFrameId !== null) cancelAnimationFrame(resizeFrameId);
       window.removeEventListener("scroll", updateTarget);
       window.removeEventListener("resize", retainProgressOnResize);
       window.removeEventListener("orientationchange", retainProgressOnResize);
       document.removeEventListener("visibilitychange", onVisibility);
+      stage.style.removeProperty("--motion-blur");
+      delete stage.dataset.frameSync;
+      delete stage.dataset.motionBlur;
     };
   }, [mobileAssets, reducedMotion]);
 

@@ -51,6 +51,11 @@ body {
 }
 
 .video-stack { z-index: 0; background: var(--black); }
+.experience[data-motion-blur="true"] .video-stack {
+  filter: blur(var(--motion-blur, 0px));
+  transform: translateZ(0) scale(1.002);
+  will-change: filter;
+}
 .festival-film {
   object-fit: cover;
   object-position: center center;

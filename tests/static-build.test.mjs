@@ -85,11 +85,16 @@ test("source keeps Pages, media and audio behavior deployment-safe", async () =>
   assert.match(source, /targetProgress = scrollProgress\(\);\s*progressMemoryRef\.current = targetProgress/);
   assert.match(source, /function smoothDampProgress/);
   assert.match(source, /const smoothTime = 0\.11/);
+  assert.match(source, /requestVideoFrameCallback/);
+  assert.match(source, /cancelVideoFrameCallback/);
+  assert.match(source, /frameGateTimeouts/);
   assert.match(source, /video\.currentTime = desired/);
+  assert.match(source, /motionBlur.*0\.36/s);
   assert.match(source, /frameId = requestAnimationFrame\(tick\)/);
   assert.match(source, /preload=\{reducedMotion \? "none"/);
   assert.match(styles, /\.scroll-spacer\s*\{[^}]*1100svh/);
   assert.match(styles, /\.experience\s*\{[^}]*100dvh/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(styles, /\.experience\[data-motion-blur="true"\] \.video-stack/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.video-stack[^}]*display:\s*none\s*!important/);
 });
