@@ -193,13 +193,11 @@ export function App() {
     setReady(false);
     let targetProgress = 0;
     let renderProgress = 0;
-    let frameId: number | null = null;
+    let frameId = 0;
     let resizeFrameId: number | null = null;
     let previousNow = performance.now();
-    let lastScrollAt = previousNow;
     let firstReady = false;
     let destroyed = false;
-    let scrollDirty = false;
     let compactLineup = window.matchMedia("(max-width: 700px)").matches;
     let activeStageChip = -1;
     let lastLineupTransform = "";
@@ -240,7 +238,6 @@ export function App() {
     };
 
     const seekVideos = (progress: number, now: number) => {
-      let pending = false;
       videos.forEach((video, index) => {
         if (!video || video.readyState < 1 || !Number.isFinite(video.duration)) return;
         const [start, end] = SEGMENTS[index];
@@ -248,7 +245,6 @@ export function App() {
         const desired = Math.min(video.duration - 1 / 48, Math.max(0, local * video.duration));
         const difference = desired - video.currentTime;
         if (Math.abs(difference) < 1 / 48) return;
-        pending = true;
         if (video.seeking && now - lastSeekAt[index] < 44) return;
 
         const maxStep = Math.abs(difference) > 1.4 ? 0.55 : Math.abs(difference) > 0.55 ? 0.28 : 0.125;
@@ -258,7 +254,6 @@ export function App() {
           lastSeekAt[index] = now;
         } catch { /* Source can briefly be unavailable while switching resolution. */ }
       });
-      return pending;
     };
 
     const renderUI = (progress: number) => {
@@ -300,52 +295,31 @@ export function App() {
     const renderFrame = (progress: number, now: number) => {
       setVideoOpacity(progress);
       renderUI(progress);
-      return seekVideos(progress, now);
+      seekVideos(progress, now);
     };
 
-    function requestTick() {
-      if (destroyed || frameId !== null) return;
-      previousNow = performance.now();
-      frameId = requestAnimationFrame(tick);
-    }
-
-    function tick(now: number) {
-      frameId = null;
-      if (scrollDirty && !resizingRef.current) {
-        scrollDirty = false;
-        targetProgress = scrollProgress();
-        progressMemoryRef.current = targetProgress;
-      }
+    const tick = (now: number) => {
       const delta = Math.min(64, Math.max(1, now - previousNow));
       previousNow = now;
-      const distance = Math.abs(targetProgress - renderProgress);
-      const responsiveness = Math.min(0.78, 0.34 + distance * 3.2);
-      const smoothing = 1 - Math.pow(1 - responsiveness, delta / 16.667);
+      const smoothing = 1 - Math.pow(1 - 0.11, delta / 16.667);
       renderProgress += (targetProgress - renderProgress) * smoothing;
-      const remaining = Math.abs(targetProgress - renderProgress);
-      if (remaining < 0.00002 || (now - lastScrollAt > 72 && remaining < 0.006)) {
-        renderProgress = targetProgress;
-      }
-      const pendingSeek = renderFrame(renderProgress, now);
-      if (scrollDirty || renderProgress !== targetProgress || pendingSeek) requestTick();
-    }
+      if (Math.abs(targetProgress - renderProgress) < 0.00002) renderProgress = targetProgress;
+      renderFrame(renderProgress, now);
+      frameId = requestAnimationFrame(tick);
+    };
 
     const updateTarget = () => {
       if (resizingRef.current) return;
-      lastScrollAt = performance.now();
-      scrollDirty = true;
-      requestTick();
+      targetProgress = scrollProgress();
+      progressMemoryRef.current = targetProgress;
     };
 
     const sync = () => {
       targetProgress = scrollProgress();
       renderProgress = targetProgress;
       progressMemoryRef.current = targetProgress;
-      scrollDirty = false;
       previousNow = performance.now();
-      lastScrollAt = previousNow;
-      const pendingSeek = renderFrame(renderProgress, previousNow);
-      if (pendingSeek) requestTick();
+      renderFrame(renderProgress, previousNow);
     };
 
     const retainProgressOnResize = () => {
@@ -365,9 +339,7 @@ export function App() {
         progressMemoryRef.current = retainedProgress;
         resizingRef.current = false;
         previousNow = performance.now();
-        lastScrollAt = previousNow;
-        const pendingSeek = renderFrame(renderProgress, previousNow);
-        if (pendingSeek) requestTick();
+        renderFrame(renderProgress, previousNow);
       });
     };
 
@@ -386,7 +358,6 @@ export function App() {
         }
         if (destroyed) return;
         try { video.currentTime = 0; } catch { /* RAF retries after metadata settles. */ }
-        requestTick();
         if (index === 0 && !firstReady) {
           firstReady = true;
           clearTimeout(readyFallbackId);
@@ -417,16 +388,10 @@ export function App() {
       }
     });
 
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") sync();
-      else if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-        frameId = null;
-      }
-    };
+    const onVisibility = () => { if (document.visibilityState === "visible") sync(); };
     if (Math.abs(actualProgress - targetProgress) > 0.0001) retainProgressOnResize();
-    const initialPendingSeek = renderFrame(renderProgress, previousNow);
-    if (initialPendingSeek) requestTick();
+    renderFrame(renderProgress, previousNow);
+    frameId = requestAnimationFrame(tick);
     window.addEventListener("scroll", updateTarget, { passive: true });
     window.addEventListener("resize", retainProgressOnResize, { passive: true });
     window.addEventListener("orientationchange", retainProgressOnResize, { passive: true });
@@ -440,7 +405,7 @@ export function App() {
       warmupTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
       metadataListeners.forEach(([video, listener]) => video.removeEventListener("loadedmetadata", listener));
       seekListeners.forEach(([video, listener]) => video.removeEventListener("seeked", listener));
-      if (frameId !== null) cancelAnimationFrame(frameId);
+      cancelAnimationFrame(frameId);
       if (resizeFrameId !== null) cancelAnimationFrame(resizeFrameId);
       window.removeEventListener("scroll", updateTarget);
       window.removeEventListener("resize", retainProgressOnResize);

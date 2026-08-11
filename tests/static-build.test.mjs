@@ -82,9 +82,9 @@ test("source keeps Pages, media and audio behavior deployment-safe", async () =>
   assert.match(source, /fadeAudio\(audio, 0\.62, 800/);
   assert.doesNotMatch(source, /sessionStorage|localStorage|autoplay/);
   assert.match(source, /window\.addEventListener\("scroll", updateTarget, \{ passive: true \}\)/);
-  assert.match(source, /scrollDirty = true;\s*requestTick\(\)/);
-  assert.match(source, /const responsiveness = Math\.min\(0\.78, 0\.34 \+ distance \* 3\.2\)/);
-  assert.match(source, /now - lastScrollAt > 72/);
+  assert.match(source, /targetProgress = scrollProgress\(\);\s*progressMemoryRef\.current = targetProgress/);
+  assert.match(source, /const smoothing = 1 - Math\.pow\(1 - 0\.11, delta \/ 16\.667\)/);
+  assert.match(source, /frameId = requestAnimationFrame\(tick\)/);
   assert.match(source, /preload=\{reducedMotion \? "none"/);
   assert.match(styles, /\.scroll-spacer\s*\{[^}]*1100svh/);
   assert.match(styles, /\.experience\s*\{[^}]*100dvh/);
