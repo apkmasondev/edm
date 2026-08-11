@@ -67,12 +67,20 @@ export function App() {
   const videoRefs = useRef<Array<HTMLVideoElement | null>>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioFadeFrameRef = useRef<number | null>(null);
+  const audioCommandRef = useRef(0);
+  const soundOnRef = useRef(false);
   const progressMemoryRef = useRef<number | null>(null);
   const resizingRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [mobileAssets, setMobileAssets] = useState(() => window.matchMedia("(max-width: 900px)").matches);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [soundOn, setSoundOn] = useState(false);
   const [festivalModeRevealed, setFestivalModeRevealed] = useState(false);
+
+  const updateSoundState = (enabled: boolean) => {
+    soundOnRef.current = enabled;
+    setSoundOn(enabled);
+  };
 
   const fadeAudio = (
     audio: HTMLAudioElement,
@@ -102,11 +110,14 @@ export function App() {
   const toggleSound = async () => {
     const audio = audioRef.current;
     if (!audio) return;
+    const shouldTurnOn = !soundOnRef.current;
+    const command = ++audioCommandRef.current;
+    updateSoundState(shouldTurnOn);
 
-    if (soundOn) {
-      setSoundOn(false);
-      sessionStorage.setItem("apkmason-sound", "off");
-      fadeAudio(audio, 0, 400, () => audio.pause());
+    if (!shouldTurnOn) {
+      fadeAudio(audio, 0, 400, () => {
+        if (command === audioCommandRef.current && !soundOnRef.current) audio.pause();
+      });
       return;
     }
 
@@ -115,13 +126,24 @@ export function App() {
     audio.dataset.gain = "0.000";
     try {
       await audio.play();
-      setSoundOn(true);
-      sessionStorage.setItem("apkmason-sound", "on");
+      if (command !== audioCommandRef.current || !soundOnRef.current) {
+        audio.pause();
+        return;
+      }
       fadeAudio(audio, 0.62, 800);
     } catch {
-      setSoundOn(false);
-      sessionStorage.setItem("apkmason-sound", "off");
+      if (command === audioCommandRef.current) updateSoundState(false);
     }
+  };
+
+  const handleAudioError = () => {
+    audioCommandRef.current += 1;
+    updateSoundState(false);
+    if (audioFadeFrameRef.current !== null) {
+      cancelAnimationFrame(audioFadeFrameRef.current);
+      audioFadeFrameRef.current = null;
+    }
+    audioRef.current?.pause();
   };
 
   const replayExperience = () => {
@@ -132,22 +154,37 @@ export function App() {
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const connection = (navigator as Navigator & {
       connection?: { saveData?: boolean; effectiveType?: string };
     }).connection;
     const constrained = Boolean(connection?.saveData || /2g/.test(connection?.effectiveType || ""));
     const chooseAssets = () => setMobileAssets(media.matches || constrained);
+    const chooseMotion = () => setReducedMotion(motion.matches);
     chooseAssets();
+    chooseMotion();
     media.addEventListener("change", chooseAssets);
-    return () => media.removeEventListener("change", chooseAssets);
+    motion.addEventListener("change", chooseMotion);
+    return () => {
+      media.removeEventListener("change", chooseAssets);
+      motion.removeEventListener("change", chooseMotion);
+    };
   }, []);
 
   useEffect(() => () => {
-    if (audioFadeFrameRef.current !== null) cancelAnimationFrame(audioFadeFrameRef.current);
+    audioCommandRef.current += 1;
+    if (audioFadeFrameRef.current !== null) {
+      cancelAnimationFrame(audioFadeFrameRef.current);
+      audioFadeFrameRef.current = null;
+    }
     audioRef.current?.pause();
   }, []);
 
   useEffect(() => {
+    if (reducedMotion) {
+      return;
+    }
+
     const stage = stageRef.current;
     const videos = videoRefs.current;
     if (!stage || videos.length !== 3 || videos.some((video) => !video)) return;
@@ -156,13 +193,27 @@ export function App() {
     setReady(false);
     let targetProgress = 0;
     let renderProgress = 0;
-    let frameId = 0;
-    let resizeFrameId = 0;
+    let frameId: number | null = null;
+    let resizeFrameId: number | null = null;
     let previousNow = performance.now();
     let firstReady = false;
     let destroyed = false;
+    let scrollDirty = false;
+    let compactLineup = window.matchMedia("(max-width: 700px)").matches;
+    let activeStageChip = -1;
+    let lastLineupTransform = "";
     const lastSeekAt = [0, 0, 0];
     const warmed = [false, false, false];
+    const warmupTimeouts = new Set<number>();
+    const metadataListeners: Array<[HTMLVideoElement, () => void]> = [];
+    const seekListeners: Array<[HTMLVideoElement, () => void]> = [];
+    const beatElements = Array.from(stage.querySelectorAll<HTMLElement>("[data-beat]"));
+    const stageChips = Array.from(stage.querySelectorAll<HTMLElement>("[data-stage-chip]"));
+    const lineup = stage.querySelector<HTMLElement>("[data-lineup-track]");
+    let readyDelayId: number | null = null;
+    const readyFallbackId = window.setTimeout(() => {
+      if (!destroyed) setReady(true);
+    }, 3000);
 
     const scrollProgress = () => {
       const range = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
@@ -173,40 +224,6 @@ export function App() {
     targetProgress = progressMemoryRef.current ?? actualProgress;
     renderProgress = targetProgress;
     progressMemoryRef.current = targetProgress;
-
-    const updateTarget = () => {
-      if (resizingRef.current) return;
-      targetProgress = scrollProgress();
-      progressMemoryRef.current = targetProgress;
-    };
-
-    const warmVideo = (video: HTMLVideoElement, index: number) => {
-      if (warmed[index] || !Number.isFinite(video.duration)) return;
-      warmed[index] = true;
-      let finished = false;
-      const finish = () => {
-        if (finished || destroyed) return;
-        finished = true;
-        try { video.currentTime = 0; } catch { /* RAF retries after metadata settles. */ }
-        if (index === 0 && !firstReady) {
-          firstReady = true;
-          window.setTimeout(() => !destroyed && setReady(true), 80);
-        }
-      };
-
-      try {
-        video.currentTime = Math.min(0.001, Math.max(0, video.duration - 0.001));
-        video.addEventListener("seeked", finish, { once: true });
-        window.setTimeout(finish, 750);
-      } catch { finish(); }
-    };
-
-    videos.forEach((video, index) => {
-      if (!video) return;
-      video.pause();
-      if (video.readyState >= 1) warmVideo(video, index);
-      else video.addEventListener("loadedmetadata", () => warmVideo(video, index), { once: true });
-    });
 
     const setVideoOpacity = (progress: number) => {
       const opacities = [
@@ -222,6 +239,7 @@ export function App() {
     };
 
     const seekVideos = (progress: number, now: number) => {
+      let pending = false;
       videos.forEach((video, index) => {
         if (!video || video.readyState < 1 || !Number.isFinite(video.duration)) return;
         const [start, end] = SEGMENTS[index];
@@ -229,6 +247,7 @@ export function App() {
         const desired = Math.min(video.duration - 1 / 48, Math.max(0, local * video.duration));
         const difference = desired - video.currentTime;
         if (Math.abs(difference) < 1 / 48) return;
+        pending = true;
         if (video.seeking && now - lastSeekAt[index] < 44) return;
 
         const maxStep = Math.abs(difference) > 1.4 ? 0.55 : Math.abs(difference) > 0.55 ? 0.28 : 0.125;
@@ -238,6 +257,7 @@ export function App() {
           lastSeekAt[index] = now;
         } catch { /* Source can briefly be unavailable while switching resolution. */ }
       });
+      return pending;
     };
 
     const renderUI = (progress: number) => {
@@ -245,7 +265,7 @@ export function App() {
       stage.style.setProperty("--light-x", `${16 + progress * 70}%`);
       stage.dataset.act = progress < 0.325 ? "01" : progress < 0.655 ? "02" : "03";
 
-      stage.querySelectorAll<HTMLElement>("[data-beat]").forEach((element) => {
+      beatElements.forEach((element) => {
         const start = Number(element.dataset.start || 0);
         const end = Number(element.dataset.end || 1);
         const opacity = beatOpacity(progress, start, end, element.dataset.hold === "true");
@@ -254,44 +274,78 @@ export function App() {
         element.style.visibility = opacity < 0.006 ? "hidden" : "visible";
       });
 
-      stage.querySelectorAll<HTMLElement>("[data-stage-chip]").forEach((chip, index) => {
-        const phase = clamp((progress - 0.43) / 0.12) * 2.999;
-        chip.dataset.active = String(Math.min(2, Math.floor(phase)) === index);
-      });
+      const phase = clamp((progress - 0.43) / 0.12) * 2.999;
+      const nextStageChip = Math.min(2, Math.floor(phase));
+      if (nextStageChip !== activeStageChip) {
+        activeStageChip = nextStageChip;
+        stageChips.forEach((chip, index) => {
+          chip.dataset.active = String(index === activeStageChip);
+        });
+      }
 
-      const lineup = stage.querySelector<HTMLElement>("[data-lineup-track]");
-      if (lineup && window.innerWidth <= 700) {
+      if (lineup && compactLineup) {
         const phase = clamp((progress - 0.55) / 0.11) * 2;
-        lineup.style.transform = `translate3d(${-phase * 33.3333}%, 0, 0)`;
-      } else if (lineup) lineup.style.transform = "none";
+        const transform = `translate3d(${(-phase * 33.3333).toFixed(4)}%, 0, 0)`;
+        if (transform !== lastLineupTransform) {
+          lastLineupTransform = transform;
+          lineup.style.transform = transform;
+        }
+      } else if (lineup && lastLineupTransform !== "none") {
+        lastLineupTransform = "none";
+        lineup.style.transform = "none";
+      }
     };
 
-    const tick = (now: number) => {
+    const renderFrame = (progress: number, now: number) => {
+      setVideoOpacity(progress);
+      renderUI(progress);
+      return seekVideos(progress, now);
+    };
+
+    function requestTick() {
+      if (destroyed || frameId !== null) return;
+      frameId = requestAnimationFrame(tick);
+    }
+
+    function tick(now: number) {
+      frameId = null;
+      if (scrollDirty && !resizingRef.current) {
+        scrollDirty = false;
+        targetProgress = scrollProgress();
+        progressMemoryRef.current = targetProgress;
+      }
       const delta = Math.min(64, Math.max(1, now - previousNow));
       previousNow = now;
       const smoothing = 1 - Math.pow(1 - 0.11, delta / 16.667);
       renderProgress += (targetProgress - renderProgress) * smoothing;
       if (Math.abs(targetProgress - renderProgress) < 0.00002) renderProgress = targetProgress;
-      setVideoOpacity(renderProgress);
-      seekVideos(renderProgress, now);
-      renderUI(renderProgress);
-      frameId = requestAnimationFrame(tick);
+      const pendingSeek = renderFrame(renderProgress, now);
+      if (scrollDirty || renderProgress !== targetProgress || pendingSeek) requestTick();
+    }
+
+    const updateTarget = () => {
+      if (resizingRef.current) return;
+      scrollDirty = true;
+      requestTick();
     };
 
     const sync = () => {
       targetProgress = scrollProgress();
       renderProgress = targetProgress;
       progressMemoryRef.current = targetProgress;
+      scrollDirty = false;
       previousNow = performance.now();
-      setVideoOpacity(renderProgress);
-      renderUI(renderProgress);
+      const pendingSeek = renderFrame(renderProgress, previousNow);
+      if (pendingSeek) requestTick();
     };
 
     const retainProgressOnResize = () => {
       const retainedProgress = progressMemoryRef.current ?? targetProgress;
       resizingRef.current = true;
-      cancelAnimationFrame(resizeFrameId);
+      if (resizeFrameId !== null) cancelAnimationFrame(resizeFrameId);
       resizeFrameId = requestAnimationFrame(() => {
+        resizeFrameId = null;
+        compactLineup = window.matchMedia("(max-width: 700px)").matches;
         const range = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
         const retainedY = retainedProgress * range;
         if (Math.abs(window.scrollY - retainedY) > 1) {
@@ -302,15 +356,67 @@ export function App() {
         progressMemoryRef.current = retainedProgress;
         resizingRef.current = false;
         previousNow = performance.now();
-        setVideoOpacity(renderProgress);
-        renderUI(renderProgress);
+        const pendingSeek = renderFrame(renderProgress, previousNow);
+        if (pendingSeek) requestTick();
       });
     };
 
-    const onVisibility = () => { if (document.visibilityState === "visible") sync(); };
+    const warmVideo = (video: HTMLVideoElement, index: number) => {
+      if (warmed[index] || !Number.isFinite(video.duration)) return;
+      warmed[index] = true;
+      let finished = false;
+      let timeoutId: number | null = null;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        video.removeEventListener("seeked", finish);
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+          warmupTimeouts.delete(timeoutId);
+        }
+        if (destroyed) return;
+        try { video.currentTime = 0; } catch { /* RAF retries after metadata settles. */ }
+        requestTick();
+        if (index === 0 && !firstReady) {
+          firstReady = true;
+          clearTimeout(readyFallbackId);
+          readyDelayId = window.setTimeout(() => {
+            readyDelayId = null;
+            if (!destroyed) setReady(true);
+          }, 80);
+        }
+      };
+
+      try {
+        video.addEventListener("seeked", finish, { once: true });
+        seekListeners.push([video, finish]);
+        timeoutId = window.setTimeout(finish, 750);
+        warmupTimeouts.add(timeoutId);
+        video.currentTime = Math.min(0.001, Math.max(0, video.duration - 0.001));
+      } catch { finish(); }
+    };
+
+    videos.forEach((video, index) => {
+      if (!video) return;
+      video.pause();
+      if (video.readyState >= 1) warmVideo(video, index);
+      else {
+        const onMetadata = () => warmVideo(video, index);
+        metadataListeners.push([video, onMetadata]);
+        video.addEventListener("loadedmetadata", onMetadata, { once: true });
+      }
+    });
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") sync();
+      else if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+    };
     if (Math.abs(actualProgress - targetProgress) > 0.0001) retainProgressOnResize();
-    renderUI(renderProgress);
-    frameId = requestAnimationFrame(tick);
+    const initialPendingSeek = renderFrame(renderProgress, previousNow);
+    if (initialPendingSeek) requestTick();
     window.addEventListener("scroll", updateTarget, { passive: true });
     window.addEventListener("resize", retainProgressOnResize, { passive: true });
     window.addEventListener("orientationchange", retainProgressOnResize, { passive: true });
@@ -319,14 +425,19 @@ export function App() {
     return () => {
       destroyed = true;
       resizingRef.current = false;
-      cancelAnimationFrame(frameId);
-      cancelAnimationFrame(resizeFrameId);
+      clearTimeout(readyFallbackId);
+      if (readyDelayId !== null) clearTimeout(readyDelayId);
+      warmupTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+      metadataListeners.forEach(([video, listener]) => video.removeEventListener("loadedmetadata", listener));
+      seekListeners.forEach(([video, listener]) => video.removeEventListener("seeked", listener));
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (resizeFrameId !== null) cancelAnimationFrame(resizeFrameId);
       window.removeEventListener("scroll", updateTarget);
       window.removeEventListener("resize", retainProgressOnResize);
       window.removeEventListener("orientationchange", retainProgressOnResize);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [mobileAssets]);
+  }, [mobileAssets, reducedMotion]);
 
   const assetFolder = mobileAssets ? "mobile" : "desktop";
   const poster = `${BASE_URL}reference/03_finale_poster_1280.jpg`;
@@ -347,7 +458,7 @@ export function App() {
               className={`festival-film festival-film--${index + 1}`}
               muted
               playsInline
-              preload={index === 0 || !mobileAssets ? "auto" : "metadata"}
+              preload={reducedMotion ? "none" : index === 0 || !mobileAssets ? "auto" : "metadata"}
               poster={index === 0 ? `${BASE_URL}reference/01_opening_logo.png` : undefined}
               src={`${BASE_URL}video/${assetFolder}/${film}`}
               tabIndex={-1}
@@ -358,10 +469,10 @@ export function App() {
         <audio
           ref={audioRef}
           src={`${BASE_URL}audio/neon-skyfall.mp3`}
-          preload="metadata"
+          preload="none"
           loop
           data-gain="0.000"
-          onError={() => setSoundOn(false)}
+          onError={handleAudioError}
         />
 
         <div className="static-poster" aria-hidden="true" />
@@ -487,7 +598,7 @@ export function App() {
           <p>DESIGN FICTION / APKMASON.DEV</p>
         </footer>
 
-        <div className={`loader ${ready ? "loader--ready" : ""}`} role="status" aria-live="polite">
+        <div className={`loader ${ready || reducedMotion ? "loader--ready" : ""}`} role="status" aria-live="polite">
           <div className="loader-brand"><span className="brand-mark">A</span><strong>APKMASON</strong></div>
           <p>TUNING THE FREQUENCY</p>
           <div className="loader-line"><i /></div>
