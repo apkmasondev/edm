@@ -196,6 +196,7 @@ export function App() {
     let frameId: number | null = null;
     let resizeFrameId: number | null = null;
     let previousNow = performance.now();
+    let lastScrollAt = previousNow;
     let firstReady = false;
     let destroyed = false;
     let scrollDirty = false;
@@ -304,6 +305,7 @@ export function App() {
 
     function requestTick() {
       if (destroyed || frameId !== null) return;
+      previousNow = performance.now();
       frameId = requestAnimationFrame(tick);
     }
 
@@ -316,15 +318,21 @@ export function App() {
       }
       const delta = Math.min(64, Math.max(1, now - previousNow));
       previousNow = now;
-      const smoothing = 1 - Math.pow(1 - 0.11, delta / 16.667);
+      const distance = Math.abs(targetProgress - renderProgress);
+      const responsiveness = Math.min(0.78, 0.34 + distance * 3.2);
+      const smoothing = 1 - Math.pow(1 - responsiveness, delta / 16.667);
       renderProgress += (targetProgress - renderProgress) * smoothing;
-      if (Math.abs(targetProgress - renderProgress) < 0.00002) renderProgress = targetProgress;
+      const remaining = Math.abs(targetProgress - renderProgress);
+      if (remaining < 0.00002 || (now - lastScrollAt > 72 && remaining < 0.006)) {
+        renderProgress = targetProgress;
+      }
       const pendingSeek = renderFrame(renderProgress, now);
       if (scrollDirty || renderProgress !== targetProgress || pendingSeek) requestTick();
     }
 
     const updateTarget = () => {
       if (resizingRef.current) return;
+      lastScrollAt = performance.now();
       scrollDirty = true;
       requestTick();
     };
@@ -335,6 +343,7 @@ export function App() {
       progressMemoryRef.current = targetProgress;
       scrollDirty = false;
       previousNow = performance.now();
+      lastScrollAt = previousNow;
       const pendingSeek = renderFrame(renderProgress, previousNow);
       if (pendingSeek) requestTick();
     };
@@ -356,6 +365,7 @@ export function App() {
         progressMemoryRef.current = retainedProgress;
         resizingRef.current = false;
         previousNow = performance.now();
+        lastScrollAt = previousNow;
         const pendingSeek = renderFrame(renderProgress, previousNow);
         if (pendingSeek) requestTick();
       });
