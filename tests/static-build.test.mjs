@@ -83,7 +83,9 @@ test("source keeps Pages, media and audio behavior deployment-safe", async () =>
   assert.doesNotMatch(source, /sessionStorage|localStorage|autoplay/);
   assert.match(source, /window\.addEventListener\("scroll", updateTarget, \{ passive: true \}\)/);
   assert.match(source, /targetProgress = scrollProgress\(\);\s*progressMemoryRef\.current = targetProgress/);
-  assert.match(source, /const smoothing = 1 - Math\.pow\(1 - 0\.11, delta \/ 16\.667\)/);
+  assert.match(source, /function smoothDampProgress/);
+  assert.match(source, /const smoothTime = 0\.11/);
+  assert.match(source, /video\.currentTime = desired/);
   assert.match(source, /frameId = requestAnimationFrame\(tick\)/);
   assert.match(source, /preload=\{reducedMotion \? "none"/);
   assert.match(styles, /\.scroll-spacer\s*\{[^}]*1100svh/);

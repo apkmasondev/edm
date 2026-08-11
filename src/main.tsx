@@ -45,6 +45,24 @@ function beatOpacity(progress: number, start: number, end: number, hold: boolean
   return enter * exit;
 }
 
+function smoothDampProgress(current: number, target: number, velocity: number, deltaSeconds: number) {
+  const smoothTime = 0.11;
+  const omega = 2 / smoothTime;
+  const x = omega * deltaSeconds;
+  const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = current - target;
+  const temp = (velocity + omega * change) * deltaSeconds;
+  let nextVelocity = (velocity - omega * temp) * decay;
+  let nextProgress = target + (change + temp) * decay;
+
+  if ((target - current > 0) === (nextProgress > target)) {
+    nextProgress = target;
+    nextVelocity = 0;
+  }
+
+  return [nextProgress, nextVelocity] as const;
+}
+
 export function StageList({ compact = false }: { compact?: boolean }) {
   return (
     <div className={compact ? "stage-list stage-list--compact" : "stage-list"}>
@@ -193,6 +211,7 @@ export function App() {
     setReady(false);
     let targetProgress = 0;
     let renderProgress = 0;
+    let renderVelocity = 0;
     let frameId = 0;
     let resizeFrameId: number | null = null;
     let previousNow = performance.now();
@@ -244,13 +263,11 @@ export function App() {
         const local = clamp((progress - start) / (end - start));
         const desired = Math.min(video.duration - 1 / 48, Math.max(0, local * video.duration));
         const difference = desired - video.currentTime;
-        if (Math.abs(difference) < 1 / 48) return;
-        if (video.seeking && now - lastSeekAt[index] < 44) return;
+        if (Math.abs(difference) < 1 / 120) return;
+        if (video.seeking && now - lastSeekAt[index] < 32) return;
 
-        const maxStep = Math.abs(difference) > 1.4 ? 0.55 : Math.abs(difference) > 0.55 ? 0.28 : 0.125;
-        const nextTime = video.currentTime + clamp(difference, -maxStep, maxStep);
         try {
-          video.currentTime = clamp(nextTime, 0, Math.max(0, video.duration - 1 / 48));
+          video.currentTime = desired;
           lastSeekAt[index] = now;
         } catch { /* Source can briefly be unavailable while switching resolution. */ }
       });
@@ -301,9 +318,16 @@ export function App() {
     const tick = (now: number) => {
       const delta = Math.min(64, Math.max(1, now - previousNow));
       previousNow = now;
-      const smoothing = 1 - Math.pow(1 - 0.11, delta / 16.667);
-      renderProgress += (targetProgress - renderProgress) * smoothing;
-      if (Math.abs(targetProgress - renderProgress) < 0.00002) renderProgress = targetProgress;
+      [renderProgress, renderVelocity] = smoothDampProgress(
+        renderProgress,
+        targetProgress,
+        renderVelocity,
+        delta / 1000,
+      );
+      if (Math.abs(targetProgress - renderProgress) < 0.00001 && Math.abs(renderVelocity) < 0.0001) {
+        renderProgress = targetProgress;
+        renderVelocity = 0;
+      }
       renderFrame(renderProgress, now);
       frameId = requestAnimationFrame(tick);
     };
@@ -317,6 +341,7 @@ export function App() {
     const sync = () => {
       targetProgress = scrollProgress();
       renderProgress = targetProgress;
+      renderVelocity = 0;
       progressMemoryRef.current = targetProgress;
       previousNow = performance.now();
       renderFrame(renderProgress, previousNow);
@@ -336,6 +361,7 @@ export function App() {
         }
         targetProgress = retainedProgress;
         renderProgress = retainedProgress;
+        renderVelocity = 0;
         progressMemoryRef.current = retainedProgress;
         resizingRef.current = false;
         previousNow = performance.now();
