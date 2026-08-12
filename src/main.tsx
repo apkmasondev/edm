@@ -12,6 +12,8 @@ const FILMS = [
 
 const FILM_SEAMS = [0.335, 0.6675] as const;
 const CROSSFADE_HALF_WIDTH = 0.004;
+// Films are 24fps. Backing the final seek off the exact duration avoids landing past the last
+// decodable frame: half a frame for films 1 and 3, a full frame for film 2 whose tail is a hard cut.
 const FILM_END_SEEK_OFFSETS = [1 / 48, 2 / 24, 1 / 48] as const;
 
 const SEGMENTS = [
@@ -98,6 +100,7 @@ export function App() {
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [soundOn, setSoundOn] = useState(false);
   const [festivalModeRevealed, setFestivalModeRevealed] = useState(false);
+  const [filmFallback, setFilmFallback] = useState(false);
 
   const updateSoundState = (enabled: boolean) => {
     soundOnRef.current = enabled;
@@ -168,9 +171,16 @@ export function App() {
     audioRef.current?.pause();
   };
 
+  // A film that never decodes would otherwise leave the HUD floating over a black screen once the
+  // loader times out, so fall back to the same static poster the reduced-motion path already uses.
+  const handleFilmError = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!event.currentTarget.getAttribute("src")) return;
+    setFilmFallback(true);
+    setReady(true);
+  };
+
   const replayExperience = () => {
     setFestivalModeRevealed(false);
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top: 0, left: 0, behavior: reducedMotion ? "auto" : "smooth" });
   };
 
@@ -208,7 +218,9 @@ export function App() {
     }
 
     const stage = stageRef.current;
-    const videos = videoRefs.current;
+    // Snapshot the elements this effect owns. videoRefs.current is mutated in place during commit,
+    // so by cleanup time it already points at the *next* render's elements.
+    const videos = videoRefs.current.slice();
     if (!stage || videos.length !== 3 || videos.some((video) => !video)) return;
 
     resizingRef.current = false;
@@ -225,8 +237,13 @@ export function App() {
     let activeStageChip = -1;
     let lastLineupTransform = "";
     let lastMotionBlur = -1;
+    let lastRenderedProgress = Number.NaN;
+    let promoteTimeoutId: number | null = null;
+    let promoteListener: (() => void) | null = null;
     const lastSeekAt = [0, 0, 0];
     const warmed = [false, false, false];
+    const videoVisible: Array<boolean | null> = [null, null, null];
+    const beatVisible: boolean[] = [];
     const queuedSeekTimes: Array<number | null> = [null, null, null];
     const seekInFlight = [false, false, false];
     const frameCallbackIds: Array<number | null> = [null, null, null];
@@ -277,7 +294,11 @@ export function App() {
       videos.forEach((video, index) => {
         if (!video) return;
         video.style.opacity = opacities[index].toFixed(4);
-        video.style.visibility = opacities[index] < 0.002 ? "hidden" : "visible";
+        const visible = opacities[index] >= 0.002;
+        if (videoVisible[index] !== visible) {
+          videoVisible[index] = visible;
+          video.style.visibility = visible ? "visible" : "hidden";
+        }
       });
     };
 
@@ -348,20 +369,30 @@ export function App() {
 
     const renderUI = (progress: number) => {
       stage.style.setProperty("--progress", progress.toFixed(5));
-      stage.style.setProperty("--light-x", `${16 + progress * 70}%`);
+      // vw rather than %: the glow is positioned with a transform now, where % would resolve
+      // against the element's own box instead of the viewport.
+      stage.style.setProperty("--light-x", `${(16 + progress * 70).toFixed(3)}vw`);
       stage.dataset.act = progress < 0.325 ? "01" : progress < 0.655 ? "02" : "03";
 
-      beatElements.forEach((element) => {
+      beatElements.forEach((element, index) => {
         const start = Number(element.dataset.start || 0);
         const end = Number(element.dataset.end || 1);
         const opacity = beatOpacity(progress, start, end, element.dataset.hold === "true");
+        const visible = opacity >= 0.006;
+        // Only the handful of beats currently on screen are worth a compositor layer; promoting all
+        // of them permanently costs real VRAM on phones.
+        if (beatVisible[index] !== visible) {
+          beatVisible[index] = visible;
+          element.style.visibility = visible ? "visible" : "hidden";
+          element.style.willChange = visible ? "transform, opacity" : "auto";
+        }
+        if (!visible) return;
         element.style.opacity = opacity.toFixed(4);
         element.style.transform = `translate3d(0, ${((1 - opacity) * 18).toFixed(2)}px, 0)`;
-        element.style.visibility = opacity < 0.006 ? "hidden" : "visible";
       });
 
-      const phase = clamp((progress - 0.43) / 0.12) * 2.999;
-      const nextStageChip = Math.min(2, Math.floor(phase));
+      const chipPhase = clamp((progress - 0.43) / 0.12) * 2.999;
+      const nextStageChip = Math.min(2, Math.floor(chipPhase));
       if (nextStageChip !== activeStageChip) {
         activeStageChip = nextStageChip;
         stageChips.forEach((chip, index) => {
@@ -408,7 +439,27 @@ export function App() {
         lastMotionBlur = motionBlur;
         stage.style.setProperty("--motion-blur", `${motionBlur.toFixed(3)}px`);
       }
-      renderFrame(renderProgress, now);
+
+      const settled = renderProgress === targetProgress && renderVelocity === 0;
+      // A queued or in-flight seek still needs frames to drain, even once scrolling has stopped.
+      const seeksPending = queuedSeekTimes.some((time) => time !== null) || seekInFlight.some(Boolean);
+      if (!settled || seeksPending || renderProgress !== lastRenderedProgress) {
+        lastRenderedProgress = renderProgress;
+        renderFrame(renderProgress, now);
+      }
+
+      // Nothing left to drive: let the loop sleep instead of rewriting identical styles at 60fps.
+      if (settled && !queuedSeekTimes.some((time) => time !== null) && !seekInFlight.some(Boolean)) {
+        frameId = 0;
+        return;
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+
+    const wake = () => {
+      if (frameId || destroyed) return;
+      lastRenderedProgress = Number.NaN;
+      previousNow = performance.now();
       frameId = requestAnimationFrame(tick);
     };
 
@@ -416,6 +467,7 @@ export function App() {
       if (resizingRef.current) return;
       targetProgress = scrollProgress();
       progressMemoryRef.current = targetProgress;
+      wake();
     };
 
     const sync = () => {
@@ -425,6 +477,8 @@ export function App() {
       progressMemoryRef.current = targetProgress;
       previousNow = performance.now();
       renderFrame(renderProgress, previousNow);
+      lastRenderedProgress = renderProgress;
+      wake();
     };
 
     const retainProgressOnResize = () => {
@@ -446,6 +500,8 @@ export function App() {
         resizingRef.current = false;
         previousNow = performance.now();
         renderFrame(renderProgress, previousNow);
+        lastRenderedProgress = renderProgress;
+        wake();
       });
     };
 
@@ -464,6 +520,9 @@ export function App() {
         }
         if (destroyed) return;
         try { video.currentTime = 0; } catch { /* RAF retries after metadata settles. */ }
+        // Metadata can land after the loop has already parked, and this film has not been seeked
+        // to the current scroll position yet — wake the loop so it catches up.
+        wake();
         if (index === 0 && !firstReady) {
           firstReady = true;
           clearTimeout(readyFallbackId);
@@ -494,6 +553,31 @@ export function App() {
       }
     });
 
+    // Films 2 and 3 start at "metadata" so they do not race film 1 for bandwidth — the first frame
+    // is the whole first impression. They are promoted to full buffering once film 1 can play
+    // through, or after a grace period if that event never arrives.
+    const promoteRemainingFilms = () => {
+      if (destroyed) return;
+      if (promoteTimeoutId !== null) {
+        clearTimeout(promoteTimeoutId);
+        promoteTimeoutId = null;
+      }
+      videos.forEach((video, index) => {
+        if (!video || index === 0 || video.preload === "auto") return;
+        video.preload = "auto";
+      });
+    };
+
+    const firstFilm = videos[0];
+    if (firstFilm && !reducedMotion) {
+      if (firstFilm.readyState >= 3) promoteRemainingFilms();
+      else {
+        promoteListener = promoteRemainingFilms;
+        firstFilm.addEventListener("canplaythrough", promoteRemainingFilms, { once: true });
+        promoteTimeoutId = window.setTimeout(promoteRemainingFilms, 6000);
+      }
+    }
+
     const onVisibility = () => { if (document.visibilityState === "visible") sync(); };
     if (Math.abs(actualProgress - targetProgress) > 0.0001) retainProgressOnResize();
     renderFrame(renderProgress, previousNow);
@@ -508,12 +592,20 @@ export function App() {
       resizingRef.current = false;
       clearTimeout(readyFallbackId);
       if (readyDelayId !== null) clearTimeout(readyDelayId);
+      if (promoteTimeoutId !== null) clearTimeout(promoteTimeoutId);
+      if (promoteListener && videos[0]) videos[0].removeEventListener("canplaythrough", promoteListener);
       warmupTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
       metadataListeners.forEach(([video, listener]) => video.removeEventListener("loadedmetadata", listener));
       seekListeners.forEach(([video, listener]) => video.removeEventListener("seeked", listener));
       videos.forEach((video, index) => {
         if (video) releaseFrameGate(video, index, true);
         queuedSeekTimes[index] = null;
+        // A detached <video> holds its decoded buffer and connection until GC eventually runs.
+        // isConnected keeps this from touching elements that are merely being re-configured.
+        if (video && !video.isConnected) {
+          video.removeAttribute("src");
+          video.load();
+        }
       });
       cancelAnimationFrame(frameId);
       if (resizeFrameId !== null) cancelAnimationFrame(resizeFrameId);
@@ -536,6 +628,7 @@ export function App() {
         className="experience"
         ref={stageRef}
         aria-label="APKMASON EDM Music Festival interactive film"
+        data-film-fallback={filmFallback}
         style={{ "--poster-url": `url(${poster})` } as React.CSSProperties}
       >
         <div className="video-stack" aria-hidden="true">
@@ -546,10 +639,11 @@ export function App() {
               className={`festival-film festival-film--${index + 1}`}
               muted
               playsInline
-              preload={reducedMotion ? "none" : index === 0 || !mobileAssets ? "auto" : "metadata"}
-              poster={index === 0 ? `${BASE_URL}reference/01_opening_logo.png` : undefined}
+              preload={reducedMotion ? "none" : index === 0 ? "auto" : "metadata"}
+              poster={index === 0 ? `${BASE_URL}reference/01_opening_logo.webp` : undefined}
               src={`${BASE_URL}video/${assetFolder}/${film}`}
               tabIndex={-1}
+              onError={handleFilmError}
             />
           ))}
         </div>
@@ -697,9 +791,16 @@ export function App() {
 }
 
 const container = document.getElementById("root")!;
+// The cached root only exists to survive dev-server hot reloads; production ships a bare root
+// rather than a global handle on the whole React tree.
 const rootScope = globalThis as typeof globalThis & { __APKMASON_ROOT__?: Root };
-const root = rootScope.__APKMASON_ROOT__ ?? createRoot(container);
-rootScope.__APKMASON_ROOT__ = root;
+let root: Root;
+if (import.meta.env.DEV) {
+  root = rootScope.__APKMASON_ROOT__ ?? createRoot(container);
+  rootScope.__APKMASON_ROOT__ = root;
+} else {
+  root = createRoot(container);
+}
 
 root.render(
   <React.StrictMode><App /></React.StrictMode>,

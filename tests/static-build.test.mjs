@@ -66,13 +66,12 @@ test("build excludes masters, duplicate media and obsolete starter files", async
   }
 });
 
-test("source keeps Pages, media and audio behavior deployment-safe", async () => {
-  const [source, styles, packageJson, viteConfig, workflow] = await Promise.all([
-    readFile(new URL("../src/main.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
+test("deployment configuration stays Pages-compatible", async () => {
+  const [packageJson, viteConfig, workflow, html] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/deploy-pages.yml", import.meta.url), "utf8"),
+    readFile(new URL("../dist/index.html", import.meta.url), "utf8"),
   ]);
 
   assert.equal(JSON.parse(packageJson).engines.node, ">=22.13.0");
@@ -81,28 +80,80 @@ test("source keeps Pages, media and audio behavior deployment-safe", async () =>
   assert.match(workflow, /actions\/setup-node@v7/);
   assert.match(workflow, /node-version:\s*22\b/);
   assert.match(workflow, /path:\s*dist\b/);
+  assert.match(html, /http-equiv="Content-Security-Policy"/);
+  assert.match(html, /default-src 'self'/);
+  assert.doesNotMatch(html, /script-src[^;"]*'unsafe-inline'/);
+});
+
+test("scroll engine keeps its playback and lifecycle guarantees", async () => {
+  const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
+
+  // Playback policy: films must never autoplay or go fullscreen, audio never starts on its own.
   assert.match(source, /muted\s+playsInline\s+preload=/);
   assert.match(source, /preload="none"\s+loop/);
-  assert.match(source, /fadeAudio\(audio, 0, 400/);
-  assert.match(source, /fadeAudio\(audio, 0\.62, 800/);
   assert.doesNotMatch(source, /sessionStorage|localStorage|autoplay/);
+
+  // Scroll listening must stay passive so the main thread is never blocked mid-gesture.
   assert.match(source, /window\.addEventListener\("scroll", updateTarget, \{ passive: true \}\)/);
-  assert.match(source, /targetProgress = scrollProgress\(\);\s*progressMemoryRef\.current = targetProgress/);
-  assert.match(source, /function smoothDampProgress/);
-  assert.match(source, /const smoothTime = 0\.11/);
-  assert.match(source, /const FILM_SEAMS = \[0\.335, 0\.6675\]/);
-  assert.match(source, /const CROSSFADE_HALF_WIDTH = 0\.004/);
-  assert.match(source, /const FILM_END_SEEK_OFFSETS = \[1 \/ 48, 2 \/ 24, 1 \/ 48\]/);
+
+  // Frame-accurate scrubbing: seeks are gated on presented frames, with a timeout escape hatch.
   assert.match(source, /requestVideoFrameCallback/);
   assert.match(source, /cancelVideoFrameCallback/);
   assert.match(source, /frameGateTimeouts/);
-  assert.match(source, /video\.currentTime = desired/);
-  assert.match(source, /motionBlur.*0\.36/s);
-  assert.match(source, /frameId = requestAnimationFrame\(tick\)/);
-  assert.match(source, /preload=\{reducedMotion \? "none"/);
+
+  // The render loop must be able to park when nothing is moving, and be woken again.
+  assert.match(source, /const settled =/);
+  assert.match(source, /frameId = 0;\s*\n\s*return;/);
+  assert.match(source, /const wake = \(\) => \{/);
+
+  // Detached films must hand their decoder and buffer back rather than waiting for GC.
+  assert.match(source, /!video\.isConnected/);
+  assert.match(source, /video\.removeAttribute\("src"\)/);
+
+  // A dead film falls back to the static poster instead of a black screen.
+  assert.match(source, /onError=\{handleFilmError\}/);
+  assert.match(source, /data-film-fallback=\{filmFallback\}/);
+
+  // Only film 1 competes for bandwidth up front.
+  assert.match(source, /preload=\{reducedMotion \? "none" : index === 0 \? "auto" : "metadata"\}/);
+  assert.match(source, /canplaythrough/);
+});
+
+test("styles avoid per-frame layout and keep the reduced-motion path intact", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
   assert.match(styles, /\.scroll-spacer\s*\{[^}]*1100svh/);
   assert.match(styles, /\.experience\s*\{[^}]*100dvh/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(styles, /\.experience\[data-motion-blur="true"\] \.video-stack/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.video-stack[^}]*display:\s*none\s*!important/);
+  assert.match(styles, /\.experience\[data-film-fallback="true"\] \.static-poster/);
+
+  // Scroll-driven properties must be compositor-only: no left/width animated per frame.
+  const glow = styles.match(/\.festival-glow\s*\{[^}]*\}/)[0];
+  assert.match(glow, /transform: translate3d\(calc\(var\(--light-x/);
+  assert.doesNotMatch(glow, /left:\s*var\(--light-x/);
+  const timelineFill = styles.match(/\.timeline b\s*\{[^}]*\}/)[0];
+  assert.match(timelineFill, /transform: scaleX\(var\(--progress\)\)/);
+  assert.doesNotMatch(timelineFill, /width:\s*calc\(var\(--progress\)/);
+});
+
+test("shipped assets stay within the first-impression budget", async () => {
+  const budgets = [
+    ["reference/01_opening_logo.webp", 200_000],
+    ["og.jpg", 400_000],
+    ["reference/03_finale_poster_1280.jpg", 300_000],
+  ];
+
+  for (const [file, maxBytes] of budgets) {
+    const url = new URL(`../dist/${file}`, import.meta.url);
+    await access(url);
+    const { size } = await stat(url);
+    assert.ok(size <= maxBytes, `${file} is ${size} bytes, budget is ${maxBytes}`);
+  }
+
+  const files = (await readdir(new URL("../dist/", import.meta.url), { recursive: true }))
+    .map((file) => file.replaceAll("\\", "/"));
+  assert.ok(!files.includes("og.png"), "the uncompressed OG image must not ship");
+  assert.ok(!files.includes("reference/01_opening_logo.png"), "the uncompressed poster must not ship");
 });

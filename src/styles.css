@@ -67,6 +67,11 @@ body {
 .festival-film--1 { opacity: 1; }
 .static-poster { display: none; background: var(--poster-url) center / cover no-repeat; }
 
+/* A film that failed to decode: keep the composition intact on the static poster instead of
+   dropping the HUD onto a black screen. */
+.experience[data-film-fallback="true"] .video-stack { display: none; }
+.experience[data-film-fallback="true"] .static-poster { display: block; }
+
 .vignette {
   z-index: 1;
   background:
@@ -76,15 +81,16 @@ body {
 }
 .festival-glow {
   z-index: 2;
-  left: var(--light-x, 20%);
+  left: 0;
   top: 55%;
   width: 44vw;
   height: 28vw;
-  transform: translate(-50%, -50%);
+  /* Driven by transform, not left: left would relayout the element on every scroll frame. */
+  transform: translate3d(calc(var(--light-x, 20vw) - 50%), -50%, 0);
   background: radial-gradient(ellipse, rgba(142,84,255,.18), rgba(23,231,255,.055) 42%, transparent 72%);
   opacity: .8;
   pointer-events: none;
-  will-change: left;
+  will-change: transform;
 }
 .grain {
   z-index: 3;
@@ -194,7 +200,8 @@ body {
   width: min(42vw, 610px);
   pointer-events: none;
 }
-.copy-beat { position: absolute; left: 0; bottom: 0; width: 100%; opacity: 0; visibility: hidden; will-change: transform, opacity; }
+/* will-change is applied per beat from renderUI, only while a beat is actually on screen. */
+.copy-beat { position: absolute; left: 0; bottom: 0; width: 100%; opacity: 0; visibility: hidden; }
 .eyebrow, .meta, .fiction-note, .support { margin: 0; text-transform: uppercase; }
 .eyebrow { display: flex; align-items: center; gap: 9px; margin-bottom: 15px; font-size: clamp(8px, .68vw, 11px); letter-spacing: .32em; color: rgba(255,255,255,.76); }
 .eyebrow::before { content: ""; width: 27px; height: 1px; background: currentColor; box-shadow: 0 0 9px currentColor; }
@@ -320,7 +327,8 @@ h2 { font-size: clamp(50px, 6.25vw, 108px); }
 .experience[data-act="01"] .act-name--1, .experience[data-act="02"] .act-name--2, .experience[data-act="03"] .act-name--3 { opacity: 1; }
 .timeline { position: relative; height: 1px; background: rgba(255,255,255,.2); }
 .timeline i { position: absolute; left: 33.3%; top: -2px; width: 1px; height: 5px; background: rgba(255,255,255,.38); box-shadow: 136px 0 rgba(255,255,255,.38); }
-.timeline b { display: block; width: calc(var(--progress) * 100%); height: 1px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta)); box-shadow: 0 0 10px rgba(23,231,255,.65); }
+/* scaleX rather than width: the gradient compresses identically, without a layout pass per frame. */
+.timeline b { display: block; width: 100%; height: 1px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta)); box-shadow: 0 0 10px rgba(23,231,255,.65); transform: scaleX(var(--progress)); transform-origin: left; will-change: transform; }
 .timeline-numbers { display: flex; justify-content: space-between; color: rgba(255,255,255,.7); font-size: 7px; letter-spacing: .12em; }
 .reduced-lineup { display: none; }
 
