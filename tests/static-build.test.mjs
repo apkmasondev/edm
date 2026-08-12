@@ -153,7 +153,11 @@ test("the finale sigil is anchored to the film, not the viewport", async () => {
   assert.match(styles, /\.finale-sigil\s*\{[^}]*translate3d\(calc\(var\(--sigil-x/);
   assert.match(styles, /\.experience\[data-sigil="off"\] \.finale-sigil\s*\{[^}]*display:\s*none/);
   assert.match(source, /<div className="sigil-frame" data-beat/);
-  assert.match(styles, /sigil-signal-tear 8\.4s steps/);
+  assert.match(source, /\["cyan", "magenta", "core"\] as const/);
+  assert.match(source, /sigil-stroke sigil-stroke--upper-left/);
+  assert.match(source, /sigil-stroke sigil-stroke--lower-right/);
+  assert.match(source, /sigil-stroke sigil-stroke--bar/);
+  assert.match(styles, /sigil-letter-glitch 8\.4s steps/);
   assert.match(styles, /sigil-lock-pulse 8\.4s/);
   assert.match(styles, /data-sigil-active="true"/);
   assert.match(styles, /not\(\[data-sigil-active="true"\]\)[\s\S]{0,500}animation-name:\s*none/);
@@ -176,11 +180,11 @@ test("styles avoid per-frame layout and keep the reduced-motion path intact", as
   const timelineFill = styles.match(/\.timeline b\s*\{[^}]*\}/)[0];
   assert.match(timelineFill, /transform: scaleX\(var\(--progress\)\)/);
   assert.doesNotMatch(timelineFill, /width:\s*calc\(var\(--progress\)/);
-  const sigilSweepStart = styles.indexOf("@keyframes sigil-sweep");
-  const sigilSweepEnd = styles.indexOf("@keyframes sigil-signal-tear", sigilSweepStart);
-  const sigilSweep = styles.slice(sigilSweepStart, sigilSweepEnd);
-  assert.match(sigilSweep, /translate3d/);
-  assert.doesNotMatch(sigilSweep, /\btop\s*:/);
+  const sigilLockStart = styles.indexOf("@keyframes sigil-lock-pulse");
+  const sigilLockEnd = styles.indexOf("\n\n.top-hud", sigilLockStart);
+  const sigilLock = styles.slice(sigilLockStart, sigilLockEnd);
+  assert.match(sigilLock, /translate3d/);
+  assert.doesNotMatch(sigilLock, /\bleft\s*:/);
 });
 
 test("shipped assets stay within the first-impression budget", async () => {

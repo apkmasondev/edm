@@ -106,8 +106,8 @@ body {
 }
 
 /* Anchored to the firework "A" in film 3. Every value below is driven by --sigil-*, which main.tsx
-   recomputes from the film's cover geometry, so the reticle stays welded to the letter through any
-   resize. It sits under the grain and scanlines so it reads as part of the film, not on top of it. */
+   recomputes from the film's cover geometry, so the CSS brand mark stays welded to the letter through
+   any resize. It sits under the grain and scanlines so it reads as part of the film, not on top of it. */
 .finale-sigil {
   position: absolute;
   z-index: 2;
@@ -118,110 +118,128 @@ body {
   transform: translate3d(calc(var(--sigil-x, 50%) - 50%), calc(var(--sigil-y, 50%) - 50%), 0);
   pointer-events: none;
 }
-.sigil-frame { position: absolute; inset: 0; opacity: 0; visibility: hidden; }
-.sigil-frame::before, .sigil-frame::after {
-  content: "";
+.sigil-frame {
   position: absolute;
-  pointer-events: none;
+  inset: 0;
   opacity: 0;
+  visibility: hidden;
+  isolation: isolate;
+}
+.experience[data-sigil="off"] .finale-sigil { display: none; }
+.sigil-letter {
+  --sigil-stroke: clamp(2px, 1.35%, 8px);
+  position: absolute;
+  inset: 4%;
+  transform-origin: 50% 52%;
   mix-blend-mode: screen;
   animation-play-state: paused;
   will-change: auto;
 }
-.sigil-frame::before {
-  inset: 0;
-  background:
-    linear-gradient(90deg, transparent 0 8%, rgba(23,231,255,.82) 14%, rgba(255,255,255,.7) 29%, transparent 48%, rgba(255,59,200,.72) 68%, transparent 92%) 0 27% / 100% 2px no-repeat,
-    linear-gradient(90deg, transparent 0 18%, rgba(255,59,200,.7) 32%, transparent 55%, rgba(23,231,255,.72) 76%, transparent 100%) 0 51% / 100% 1px no-repeat,
-    linear-gradient(90deg, transparent 0 5%, rgba(23,231,255,.64) 22%, transparent 42%, rgba(255,255,255,.62) 61%, rgba(255,59,200,.66) 78%, transparent 96%) 0 73% / 100% 2px no-repeat;
-  animation: sigil-signal-tear 8.4s steps(1, end) infinite;
+.sigil-stroke {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: var(--sigil-paint);
+}
+.sigil-stroke--upper-left, .sigil-stroke--upper-right,
+.sigil-stroke--lower-left, .sigil-stroke--lower-right {
+  top: 0;
+  left: calc(50% - var(--sigil-stroke) / 2);
+  width: var(--sigil-stroke);
+  transform-origin: 50% 0;
+}
+.sigil-stroke--upper-left, .sigil-stroke--upper-right { height: 62%; }
+.sigil-stroke--upper-left { transform: rotate(28deg); }
+.sigil-stroke--upper-right { transform: rotate(-28deg); }
+.sigil-stroke--bar {
+  left: 4.75%;
+  top: 53%;
+  width: 94.25%;
+  height: var(--sigil-stroke);
+  transform: translate3d(0, -50%, 0);
+}
+.sigil-stroke--lower-left, .sigil-stroke--lower-right {
+  top: 58.5%;
+  height: 41.5%;
+}
+.sigil-stroke--lower-left {
+  left: calc(25% - var(--sigil-stroke) / 2);
+  transform: rotate(21.5deg);
+}
+.sigil-stroke--lower-right {
+  left: calc(75% - var(--sigil-stroke) / 2);
+  transform: rotate(-21.5deg);
+}
+.sigil-letter--core {
+  --sigil-paint: linear-gradient(180deg, rgba(255,255,255,.9), rgba(23,231,255,.72) 30%, rgba(142,84,255,.68) 66%, rgba(255,59,200,.76));
+  animation: sigil-letter-pulse 5.6s ease-in-out infinite;
   animation-play-state: paused;
 }
-.sigil-frame::after {
-  inset: -5%;
-  background:
-    radial-gradient(circle at center, rgba(255,255,255,.88) 0 1px, rgba(23,231,255,.48) 2px 5%, transparent 14%),
-    radial-gradient(circle at center, transparent 0 12%, rgba(142,84,255,.42) 12.5% 13%, transparent 14%);
-  transform: scale(.78);
+.sigil-letter--core .sigil-stroke {
+  box-shadow: 0 0 5px rgba(255,255,255,.35), 0 0 13px rgba(23,231,255,.3);
+}
+.sigil-letter--cyan, .sigil-letter--magenta {
+  opacity: 0;
+  animation: sigil-letter-glitch 8.4s steps(1, end) infinite;
+  animation-play-state: paused;
+}
+.sigil-letter--cyan {
+  --sigil-paint: rgba(23,231,255,.8);
+  animation-name: sigil-letter-glitch-cyan;
+}
+.sigil-letter--magenta {
+  --sigil-paint: rgba(255,59,200,.76);
+  animation-name: sigil-letter-glitch-magenta;
+}
+.sigil-lock {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(26px, 10%, 54px);
+  aspect-ratio: 1;
+  border: 1px solid rgba(23,231,255,.7);
+  border-radius: 50%;
+  opacity: 0;
+  box-shadow: 0 0 12px rgba(23,231,255,.28), inset 0 0 8px rgba(142,84,255,.22);
+  transform: translate3d(-50%, -50%, 0) scale(.6);
   transform-origin: center;
+  mix-blend-mode: screen;
   animation: sigil-lock-pulse 8.4s cubic-bezier(.2,.75,.25,1) infinite;
   animation-play-state: paused;
 }
-.experience[data-sigil="off"] .finale-sigil { display: none; }
-.sigil-halo {
-  position: absolute;
-  inset: -14%;
-  background: radial-gradient(ellipse at center, rgba(23,231,255,.20), rgba(142,84,255,.10) 45%, transparent 70%);
-  mix-blend-mode: screen;
-  animation: sigil-breathe 5.6s ease-in-out infinite;
-  animation-play-state: paused;
-}
-.sigil-corner {
-  position: absolute;
-  width: clamp(14px, 1.5vw, 26px);
-  height: clamp(14px, 1.5vw, 26px);
-  border: 1px solid rgba(23,231,255,.9);
-  filter: drop-shadow(0 0 6px rgba(23,231,255,.55));
-  animation: sigil-flicker 4.4s steps(1, end) infinite;
-  animation-play-state: paused;
-}
-.sigil-corner--tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
-.sigil-corner--tr { top: 0; right: 0; border-left: 0; border-bottom: 0; animation-delay: -.7s; }
-.sigil-corner--bl { bottom: 0; left: 0; border-right: 0; border-top: 0; animation-delay: -1.9s; }
-.sigil-corner--br { bottom: 0; right: 0; border-left: 0; border-top: 0; animation-delay: -2.8s; }
-.sigil-scan {
-  position: absolute;
-  left: -3%;
-  right: -3%;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(23,231,255,.75) 22%, rgba(255,255,255,.9) 50%, rgba(255,59,200,.6) 78%, transparent);
-  box-shadow: 0 0 10px rgba(23,231,255,.5);
-  animation: sigil-sweep 5.2s cubic-bezier(.5,0,.5,1) infinite;
-  animation-play-state: paused;
-}
-.experience[data-sigil-active="true"][data-sigil="on"] .sigil-halo,
-.experience[data-sigil-active="true"][data-sigil="on"] .sigil-corner,
-.experience[data-sigil-active="true"][data-sigil="on"] .sigil-scan,
-.experience[data-sigil-active="true"][data-sigil="on"] .sigil-frame::before,
-.experience[data-sigil-active="true"][data-sigil="on"] .sigil-frame::after {
+.experience[data-sigil-active="true"][data-sigil="on"] .sigil-letter,
+.experience[data-sigil-active="true"][data-sigil="on"] .sigil-lock {
   animation-play-state: running;
   will-change: transform, opacity;
 }
-.experience:not([data-sigil-active="true"]) .sigil-halo,
-.experience:not([data-sigil-active="true"]) .sigil-corner,
-.experience:not([data-sigil-active="true"]) .sigil-scan,
-.experience:not([data-sigil-active="true"]) .sigil-frame::before,
-.experience:not([data-sigil-active="true"]) .sigil-frame::after {
+.experience:not([data-sigil-active="true"]) .sigil-letter,
+.experience:not([data-sigil-active="true"]) .sigil-lock {
   animation-name: none;
 }
-@keyframes sigil-breathe { 0%, 100% { opacity: .48; transform: scale(.985); } 50% { opacity: .82; transform: scale(1.02); } }
-@keyframes sigil-flicker {
-  0%, 5%, 7%, 46%, 49%, 100% { opacity: 1; }
-  6% { opacity: .25; }
-  47% { opacity: .35; }
-  48% { opacity: .8; }
-  70% { opacity: .55; }
-  71% { opacity: 1; }
+@keyframes sigil-letter-pulse {
+  0%, 35%, 37%, 100% { opacity: .42; transform: scale(.996); }
+  36% { opacity: .2; transform: scale(.996); }
+  38%, 52% { opacity: .64; transform: scale(1.006); }
 }
-@keyframes sigil-sweep {
-  0%, 8% { opacity: 0; transform: translate3d(0, 0, 0); }
-  14% { opacity: 1; transform: translate3d(0, 0, 0); }
-  86% { opacity: 1; transform: translate3d(0, calc(var(--sigil-h, 0px) - 1px), 0); }
-  92%, 100% { opacity: 0; transform: translate3d(0, calc(var(--sigil-h, 0px) - 1px), 0); }
+@keyframes sigil-letter-glitch-cyan {
+  0%, 2%, 6%, 100% { opacity: 0; transform: translate3d(0, 0, 0) scale(1); }
+  2.5% { opacity: .72; transform: translate3d(-8px, 1px, 0) scale(1.012); }
+  3.2% { opacity: .34; transform: translate3d(5px, -1px, 0) scale(.996); }
+  4% { opacity: .58; transform: translate3d(-3px, 0, 0) scale(1.006); }
+  4.8% { opacity: .18; transform: translate3d(2px, 0, 0) scale(1); }
 }
-@keyframes sigil-signal-tear {
-  0%, 2%, 6%, 100% { opacity: 0; transform: translate3d(0, 0, 0); }
-  2.5% { opacity: .9; transform: translate3d(-8px, 0, 0); }
-  3.2% { opacity: .58; transform: translate3d(7px, 0, 0); }
-  4% { opacity: .82; transform: translate3d(-3px, 0, 0); }
-  4.8% { opacity: .34; transform: translate3d(4px, 0, 0); }
+@keyframes sigil-letter-glitch-magenta {
+  0%, 2%, 6%, 100% { opacity: 0; transform: translate3d(0, 0, 0) scale(1); }
+  2.5% { opacity: .62; transform: translate3d(7px, -1px, 0) scale(.998); }
+  3.2% { opacity: .28; transform: translate3d(-5px, 1px, 0) scale(1.01); }
+  4% { opacity: .52; transform: translate3d(4px, 0, 0) scale(1.003); }
+  4.8% { opacity: .16; transform: translate3d(-2px, 0, 0) scale(1); }
 }
 @keyframes sigil-lock-pulse {
-  0%, 5%, 10%, 100% { opacity: 0; transform: scale(.78); }
-  6% { opacity: .86; transform: scale(.9); }
-  7.4% { opacity: .42; transform: scale(1.05); }
-  9% { opacity: 0; transform: scale(1.16); }
+  0%, 5%, 11%, 100% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(.6); }
+  6.2% { opacity: .82; transform: translate3d(-50%, -50%, 0) scale(.9); }
+  8% { opacity: .32; transform: translate3d(-50%, -50%, 0) scale(1.28); }
+  10% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(1.55); }
 }
 
 .top-hud, .bottom-hud, .copy-safe-area, .lineup-viewport, .reduced-lineup { position: absolute; z-index: 10; }

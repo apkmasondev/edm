@@ -21,7 +21,7 @@ const FILM_END_SEEK_OFFSETS = [1 / 48, 2 / 24, 1 / 48] as const;
 // the viewport: the mapping below re-derives its pixel position from the film's own cover geometry
 // on every resize, which is what keeps it from drifting off the letter.
 // Letter measured at 0.325-0.675 across and 0.143-0.657 down; the box is padded slightly so the
-// bracket corners frame the letter instead of sitting on top of its strokes.
+// CSS brand mark can lock onto the firework letter without clipping its glow.
 const SIGIL = { centerX: 0.5, centerY: 0.4, width: 0.38, height: 0.56 } as const;
 const SIGIL_START = 0.94;
 
@@ -774,17 +774,21 @@ export function App() {
 
         <div className="static-poster" aria-hidden="true" />
 
-        {/* Outer box owns the position (transform driven by --sigil-*); the inner frame carries the
+        {/* Outer box owns the position (transform driven by --sigil-*); the inner mark carries the
             data-beat fade, because renderUI writes an inline transform onto every beat element and
             would otherwise overwrite the anchoring. */}
         <div className="finale-sigil" aria-hidden="true">
           <div className="sigil-frame" data-beat data-start={SIGIL_START} data-end="1" data-hold="true">
-            <span className="sigil-halo" />
-            <i className="sigil-corner sigil-corner--tl" />
-            <i className="sigil-corner sigil-corner--tr" />
-            <i className="sigil-corner sigil-corner--bl" />
-            <i className="sigil-corner sigil-corner--br" />
-            <span className="sigil-scan" />
+            {(["cyan", "magenta", "core"] as const).map((layer) => (
+              <span className={`sigil-letter sigil-letter--${layer}`} key={layer}>
+                <i className="sigil-stroke sigil-stroke--upper-left" />
+                <i className="sigil-stroke sigil-stroke--upper-right" />
+                <i className="sigil-stroke sigil-stroke--bar" />
+                <i className="sigil-stroke sigil-stroke--lower-left" />
+                <i className="sigil-stroke sigil-stroke--lower-right" />
+              </span>
+            ))}
+            <span className="sigil-lock" />
           </div>
         </div>
 
