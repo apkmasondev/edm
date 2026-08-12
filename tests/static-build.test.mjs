@@ -30,6 +30,11 @@ test("GitHub Pages output includes all optimized films", async () => {
       const moov = bytes.indexOf(Buffer.from("moov"));
       const mdat = bytes.indexOf(Buffer.from("mdat"));
       assert.ok(moov > 0 && mdat > moov, `${size}/${film} is missing MP4 fast-start`);
+      assert.equal(
+        bytes.indexOf(Buffer.from("stss")),
+        -1,
+        `${size}/${film} is not All-I and will stutter during scroll scrubbing`,
+      );
     }
   }
 });
