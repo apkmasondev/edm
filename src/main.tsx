@@ -23,6 +23,7 @@ const FILM_END_SEEK_OFFSETS = [1 / 48, 2 / 24, 1 / 48] as const;
 // Letter measured at 0.325-0.675 across and 0.143-0.657 down; the box is padded slightly so the
 // bracket corners frame the letter instead of sitting on top of its strokes.
 const SIGIL = { centerX: 0.5, centerY: 0.4, width: 0.38, height: 0.56 } as const;
+const SIGIL_START = 0.94;
 
 const SEGMENTS = [
   [0, FILM_SEAMS[0]],
@@ -293,6 +294,7 @@ export function App() {
     let lastLineupTransform = "";
     let lastMotionBlur = -1;
     let lastRenderedProgress = Number.NaN;
+    let sigilActive = false;
     let promoteTimeoutId: number | null = null;
     let promoteListener: (() => void) | null = null;
     const lastSeekAt = [0, 0, 0];
@@ -428,6 +430,12 @@ export function App() {
       // against the element's own box instead of the viewport.
       stage.style.setProperty("--light-x", `${(16 + progress * 70).toFixed(3)}vw`);
       stage.dataset.act = progress < 0.325 ? "01" : progress < 0.655 ? "02" : "03";
+
+      const nextSigilActive = progress >= SIGIL_START;
+      if (nextSigilActive !== sigilActive) {
+        sigilActive = nextSigilActive;
+        stage.dataset.sigilActive = String(nextSigilActive);
+      }
 
       beatElements.forEach((element, index) => {
         const start = Number(element.dataset.start || 0);
@@ -720,6 +728,7 @@ export function App() {
       stage.style.removeProperty("--motion-blur");
       ["--sigil-x", "--sigil-y", "--sigil-w", "--sigil-h"].forEach((name) => stage.style.removeProperty(name));
       delete stage.dataset.sigil;
+      delete stage.dataset.sigilActive;
       delete stage.dataset.frameSync;
       delete stage.dataset.motionBlur;
     };
@@ -769,7 +778,7 @@ export function App() {
             data-beat fade, because renderUI writes an inline transform onto every beat element and
             would otherwise overwrite the anchoring. */}
         <div className="finale-sigil" aria-hidden="true">
-          <div className="sigil-frame" data-beat data-start="0.94" data-end="1" data-hold="true">
+          <div className="sigil-frame" data-beat data-start={SIGIL_START} data-end="1" data-hold="true">
             <span className="sigil-halo" />
             <i className="sigil-corner sigil-corner--tl" />
             <i className="sigil-corner sigil-corner--tr" />
