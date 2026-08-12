@@ -82,7 +82,12 @@ test("deployment configuration stays Pages-compatible", async () => {
   assert.match(workflow, /path:\s*dist\b/);
   assert.match(html, /http-equiv="Content-Security-Policy"/);
   assert.match(html, /default-src 'self'/);
-  assert.doesNotMatch(html, /script-src[^;"]*'unsafe-inline'/);
+  // No third-party script, style, media or fetch origin may be reachable, whatever else the policy
+  // has to tolerate for the CDN's edge-injected snippet.
+  assert.doesNotMatch(html, /script-src[^;"]*https?:/);
+  assert.match(html, /connect-src 'self'/);
+  assert.match(html, /object-src 'none'/);
+  assert.match(html, /base-uri 'none'/);
 });
 
 test("scroll engine keeps its playback and lifecycle guarantees", async () => {
