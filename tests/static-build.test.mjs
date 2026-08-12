@@ -90,6 +90,9 @@ test("source keeps Pages, media and audio behavior deployment-safe", async () =>
   assert.match(source, /targetProgress = scrollProgress\(\);\s*progressMemoryRef\.current = targetProgress/);
   assert.match(source, /function smoothDampProgress/);
   assert.match(source, /const smoothTime = 0\.11/);
+  assert.match(source, /const FILM_SEAMS = \[0\.335, 0\.6675\]/);
+  assert.match(source, /const CROSSFADE_HALF_WIDTH = 0\.004/);
+  assert.match(source, /const FILM_END_SEEK_OFFSETS = \[1 \/ 48, 2 \/ 24, 1 \/ 48\]/);
   assert.match(source, /requestVideoFrameCallback/);
   assert.match(source, /cancelVideoFrameCallback/);
   assert.match(source, /frameGateTimeouts/);

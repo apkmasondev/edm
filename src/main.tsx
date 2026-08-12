@@ -10,10 +10,14 @@ const FILMS = [
   "festival_03_grand_finale.mp4",
 ] as const;
 
+const FILM_SEAMS = [0.335, 0.6675] as const;
+const CROSSFADE_HALF_WIDTH = 0.004;
+const FILM_END_SEEK_OFFSETS = [1 / 48, 2 / 24, 1 / 48] as const;
+
 const SEGMENTS = [
-  [0, 0.345],
-  [0.325, 0.68],
-  [0.655, 1],
+  [0, FILM_SEAMS[0]],
+  [FILM_SEAMS[0], FILM_SEAMS[1]],
+  [FILM_SEAMS[1], 1],
 ] as const;
 
 const STAGES = [
@@ -255,10 +259,20 @@ export function App() {
     progressMemoryRef.current = targetProgress;
 
     const setVideoOpacity = (progress: number) => {
+      const firstBlend = smoothstep(
+        FILM_SEAMS[0] - CROSSFADE_HALF_WIDTH,
+        FILM_SEAMS[0] + CROSSFADE_HALF_WIDTH,
+        progress,
+      );
+      const secondBlend = smoothstep(
+        FILM_SEAMS[1] - CROSSFADE_HALF_WIDTH,
+        FILM_SEAMS[1] + CROSSFADE_HALF_WIDTH,
+        progress,
+      );
       const opacities = [
-        1 - smoothstep(0.325, 0.345, progress),
-        smoothstep(0.325, 0.345, progress) * (1 - smoothstep(0.655, 0.68, progress)),
-        smoothstep(0.655, 0.68, progress),
+        1 - firstBlend,
+        firstBlend * (1 - secondBlend),
+        secondBlend,
       ];
       videos.forEach((video, index) => {
         if (!video) return;
@@ -325,7 +339,8 @@ export function App() {
         if (!video || video.readyState < 1 || !Number.isFinite(video.duration)) return;
         const [start, end] = SEGMENTS[index];
         const local = clamp((progress - start) / (end - start));
-        const desired = Math.min(video.duration - 1 / 48, Math.max(0, local * video.duration));
+        const maxTime = Math.max(0, video.duration - FILM_END_SEEK_OFFSETS[index]);
+        const desired = local * maxTime;
         queuedSeekTimes[index] = desired;
         flushVideoSeek(video, index, now);
       });
