@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import "./styles.css";
 
@@ -15,6 +15,14 @@ const CROSSFADE_HALF_WIDTH = 0.004;
 // Films are 24fps. Backing the final seek off the exact duration avoids landing past the last
 // decodable frame: half a frame for films 1 and 3, a full frame for film 2 whose tail is a hard cut.
 const FILM_END_SEEK_OFFSETS = [1 / 48, 2 / 24, 1 / 48] as const;
+
+// Where the firework "A" sits inside film 3's final frame, in normalized frame coordinates.
+// Measured off the decoded frame itself, so the overlay is anchored to the artwork rather than to
+// the viewport: the mapping below re-derives its pixel position from the film's own cover geometry
+// on every resize, which is what keeps it from drifting off the letter.
+// Letter measured at 0.325-0.675 across and 0.143-0.657 down; the box is padded slightly so the
+// bracket corners frame the letter instead of sitting on top of its strokes.
+const SIGIL = { centerX: 0.5, centerY: 0.4, width: 0.38, height: 0.56 } as const;
 
 const SEGMENTS = [
   [0, FILM_SEAMS[0]],
@@ -93,6 +101,7 @@ export function App() {
   const audioFadeFrameRef = useRef<number | null>(null);
   const audioCommandRef = useRef(0);
   const soundOnRef = useRef(false);
+  const suspendedByTabRef = useRef(false);
   const progressMemoryRef = useRef<number | null>(null);
   const resizingRef = useRef(false);
   const [ready, setReady] = useState(false);
@@ -107,7 +116,7 @@ export function App() {
     setSoundOn(enabled);
   };
 
-  const fadeAudio = (
+  const fadeAudio = useCallback((
     audio: HTMLAudioElement,
     targetVolume: number,
     duration: number,
@@ -130,13 +139,14 @@ export function App() {
     };
 
     audioFadeFrameRef.current = requestAnimationFrame(tick);
-  };
+  }, []);
 
   const toggleSound = async () => {
     const audio = audioRef.current;
     if (!audio) return;
     const shouldTurnOn = !soundOnRef.current;
     const command = ++audioCommandRef.current;
+    suspendedByTabRef.current = false;
     updateSoundState(shouldTurnOn);
 
     if (!shouldTurnOn) {
@@ -163,6 +173,7 @@ export function App() {
 
   const handleAudioError = () => {
     audioCommandRef.current += 1;
+    suspendedByTabRef.current = false;
     updateSoundState(false);
     if (audioFadeFrameRef.current !== null) {
       cancelAnimationFrame(audioFadeFrameRef.current);
@@ -202,6 +213,50 @@ export function App() {
       motion.removeEventListener("change", chooseMotion);
     };
   }, []);
+
+  // A background tab should be silent. The toggle keeps reading ON, because the intent to hear the
+  // soundtrack has not changed — only the tab's visibility has — so returning resumes it.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      if (document.visibilityState === "hidden") {
+        if (!soundOnRef.current) return;
+        audioCommandRef.current += 1;
+        if (audioFadeFrameRef.current !== null) {
+          cancelAnimationFrame(audioFadeFrameRef.current);
+          audioFadeFrameRef.current = null;
+        }
+        audio.pause();
+        suspendedByTabRef.current = true;
+        return;
+      }
+
+      if (!suspendedByTabRef.current) return;
+      suspendedByTabRef.current = false;
+      if (!soundOnRef.current) return;
+
+      const command = ++audioCommandRef.current;
+      audio.volume = 0;
+      audio.dataset.gain = "0.000";
+      audio.play().then(() => {
+        if (command !== audioCommandRef.current || !soundOnRef.current) {
+          audio.pause();
+          return;
+        }
+        fadeAudio(audio, 0.62, 600);
+      }).catch(() => {
+        if (command === audioCommandRef.current) {
+          soundOnRef.current = false;
+          setSoundOn(false);
+        }
+      });
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [fadeAudio]);
 
   useEffect(() => () => {
     audioCommandRef.current += 1;
@@ -413,6 +468,51 @@ export function App() {
       }
     };
 
+    // Re-derives the sigil's pixel box from film 3's actual cover geometry. object-fit: cover scales
+    // the frame by whichever axis overflows and crops the other, so a fixed % overlay would slide
+    // off the letter as soon as the viewport aspect changed. This solves the same mapping the
+    // browser does, including the object-position shift film 3 uses on narrow screens.
+    const syncSigil = () => {
+      const video = videos[2];
+      if (!video || !video.videoWidth || !video.videoHeight) return;
+
+      const boxWidth = stage.clientWidth;
+      const boxHeight = stage.clientHeight;
+      const scale = Math.max(boxWidth / video.videoWidth, boxHeight / video.videoHeight);
+      const frameWidth = video.videoWidth * scale;
+      const frameHeight = video.videoHeight * scale;
+
+      const [rawX, rawY] = window.getComputedStyle(video).objectPosition.split(" ");
+      const axisOffset = (raw: string | undefined, slack: number) => {
+        if (!raw) return slack * 0.5;
+        if (raw.endsWith("%")) return slack * (parseFloat(raw) / 100);
+        if (raw.endsWith("px")) return parseFloat(raw);
+        return slack * 0.5;
+      };
+      const offsetX = axisOffset(rawX, boxWidth - frameWidth);
+      const offsetY = axisOffset(rawY, boxHeight - frameHeight);
+
+      const centerX = offsetX + SIGIL.centerX * frameWidth;
+      const centerY = offsetY + SIGIL.centerY * frameHeight;
+      const width = SIGIL.width * frameWidth;
+      const height = SIGIL.height * frameHeight;
+
+      stage.style.setProperty("--sigil-x", `${centerX.toFixed(2)}px`);
+      stage.style.setProperty("--sigil-y", `${centerY.toFixed(2)}px`);
+      stage.style.setProperty("--sigil-w", `${width.toFixed(2)}px`);
+      stage.style.setProperty("--sigil-h", `${height.toFixed(2)}px`);
+
+      // On a narrow portrait viewport, cover crops the letter itself off both edges. Tracking it
+      // faithfully then means the brackets sit outside the screen and only a stray scan line shows,
+      // so the reticle stands down instead of half-rendering.
+      const margin = 6;
+      const fits = centerX - width / 2 >= margin
+        && centerX + width / 2 <= boxWidth - margin
+        && centerY - height / 2 >= margin
+        && centerY + height / 2 <= boxHeight - margin;
+      stage.dataset.sigil = fits ? "on" : "off";
+    };
+
     const renderFrame = (progress: number, now: number) => {
       setVideoOpacity(progress);
       renderUI(progress);
@@ -488,6 +588,7 @@ export function App() {
       resizeFrameId = requestAnimationFrame(() => {
         resizeFrameId = null;
         compactLineup = window.matchMedia("(max-width: 700px)").matches;
+        syncSigil();
         const range = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
         const retainedY = retainedProgress * range;
         if (Math.abs(window.scrollY - retainedY) > 1) {
@@ -523,6 +624,8 @@ export function App() {
         // Metadata can land after the loop has already parked, and this film has not been seeked
         // to the current scroll position yet — wake the loop so it catches up.
         wake();
+        // Intrinsic dimensions are only known now, and the sigil mapping depends on them.
+        if (index === 2) syncSigil();
         if (index === 0 && !firstReady) {
           firstReady = true;
           clearTimeout(readyFallbackId);
@@ -580,6 +683,7 @@ export function App() {
 
     const onVisibility = () => { if (document.visibilityState === "visible") sync(); };
     if (Math.abs(actualProgress - targetProgress) > 0.0001) retainProgressOnResize();
+    syncSigil();
     renderFrame(renderProgress, previousNow);
     frameId = requestAnimationFrame(tick);
     window.addEventListener("scroll", updateTarget, { passive: true });
@@ -614,6 +718,8 @@ export function App() {
       window.removeEventListener("orientationchange", retainProgressOnResize);
       document.removeEventListener("visibilitychange", onVisibility);
       stage.style.removeProperty("--motion-blur");
+      ["--sigil-x", "--sigil-y", "--sigil-w", "--sigil-h"].forEach((name) => stage.style.removeProperty(name));
+      delete stage.dataset.sigil;
       delete stage.dataset.frameSync;
       delete stage.dataset.motionBlur;
     };
@@ -658,6 +764,21 @@ export function App() {
         />
 
         <div className="static-poster" aria-hidden="true" />
+
+        {/* Outer box owns the position (transform driven by --sigil-*); the inner frame carries the
+            data-beat fade, because renderUI writes an inline transform onto every beat element and
+            would otherwise overwrite the anchoring. */}
+        <div className="finale-sigil" aria-hidden="true">
+          <div className="sigil-frame" data-beat data-start="0.94" data-end="1" data-hold="true">
+            <span className="sigil-halo" />
+            <i className="sigil-corner sigil-corner--tl" />
+            <i className="sigil-corner sigil-corner--tr" />
+            <i className="sigil-corner sigil-corner--bl" />
+            <i className="sigil-corner sigil-corner--br" />
+            <span className="sigil-scan" />
+          </div>
+        </div>
+
         <div className="vignette" aria-hidden="true" />
         <div className="festival-glow" aria-hidden="true" />
         <div className="grain" aria-hidden="true" />
@@ -669,9 +790,12 @@ export function App() {
             <div><strong>APKMASON</strong><span>EDM / 2027</span></div>
           </div>
           <span className="fiction-pill" aria-label="Design fiction festival credential">
-            <small>ACCESS // 27</small>
-            <strong>DESIGN FICTION</strong>
-            <i aria-hidden="true" />
+            <i className="pill-dot" aria-hidden="true" />
+            <span className="pill-copy">
+              <small>ACCESS // 27</small>
+              <strong>DESIGN FICTION</strong>
+            </span>
+            <i className="pill-sheen" aria-hidden="true" />
           </span>
           <button
             className="sound-toggle"
@@ -681,7 +805,12 @@ export function App() {
             data-active={soundOn}
             onClick={toggleSound}
           >
-            <i aria-hidden="true" /><span>SOUND</span><b>{soundOn ? "ON" : "OFF"}</b>
+            <span className="eq" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+            <span className="sound-copy">
+              <small>SOUNDTRACK</small>
+              <strong>{soundOn ? "PLAYING" : "MUTED"}</strong>
+            </span>
+            <i className="pill-sheen" aria-hidden="true" />
           </button>
         </header>
 
@@ -756,9 +885,12 @@ export function App() {
                   <strong>COMING SOON</strong>
                 </span>
                 <i className="mode-symbol" aria-hidden="true">↗</i>
+                <i className="pill-sheen" aria-hidden="true" />
               </button>
+              {/* Icon only: the glyph carries the meaning, and aria-label keeps it named for
+                  assistive tech and the accessible-name check. */}
               <button className="replay-button" type="button" aria-label="Replay experience" onClick={replayExperience}>
-                <i aria-hidden="true">↺</i><span>REPLAY EXPERIENCE</span>
+                <i aria-hidden="true">↺</i>
               </button>
             </div>
           </section>

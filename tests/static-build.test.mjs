@@ -124,6 +124,36 @@ test("scroll engine keeps its playback and lifecycle guarantees", async () => {
   assert.match(source, /canplaythrough/);
 });
 
+test("soundtrack follows tab visibility without losing the user's intent", async () => {
+  const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /document\.addEventListener\("visibilitychange", onVisibilityChange\)/);
+  assert.match(source, /document\.removeEventListener\("visibilitychange", onVisibilityChange\)/);
+  // Hiding the tab pauses; it must not flip the toggle, or returning would come back silent.
+  assert.match(source, /visibilityState === "hidden"[\s\S]{0,400}audio\.pause\(\)/);
+  assert.match(source, /suspendedByTabRef/);
+  // A manual mute has to survive a hide/show round trip.
+  assert.match(source, /if \(!suspendedByTabRef\.current\) return;/);
+  assert.match(source, /suspendedByTabRef\.current = false;\s*\n\s*if \(!soundOnRef\.current\) return;/);
+});
+
+test("the finale sigil is anchored to the film, not the viewport", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../src/main.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
+  ]);
+
+  // The mapping must come from the film's own cover geometry, including object-position.
+  assert.match(source, /Math\.max\(boxWidth \/ video\.videoWidth, boxHeight \/ video\.videoHeight\)/);
+  assert.match(source, /objectPosition/);
+  assert.match(source, /--sigil-x/);
+  assert.match(source, /stage\.dataset\.sigil = fits \? "on" : "off"/);
+  // Anchoring lives on the outer box; the beat system owns the inner frame's transform.
+  assert.match(styles, /\.finale-sigil\s*\{[^}]*translate3d\(calc\(var\(--sigil-x/);
+  assert.match(styles, /\.experience\[data-sigil="off"\] \.finale-sigil\s*\{[^}]*display:\s*none/);
+  assert.match(source, /<div className="sigil-frame" data-beat/);
+});
+
 test("styles avoid per-frame layout and keep the reduced-motion path intact", async () => {
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
