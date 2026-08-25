@@ -1,0 +1,11 @@
+# One line ending everywhere. Without this, a Windows checkout gets CRLF working files while CI gets
+# LF, and the build assertions that slice the stylesheet by "\n\n" pass on one machine and fail on
+# the other.
+* text=auto eol=lf
+
+*.mp4 binary
+*.mp3 binary
+*.webp binary
+*.jpg binary
+*.png binary
+*.svg text eol=lf

@@ -38,3 +38,6 @@ public/reference/03_finale_poster.png
 
 # Obsolete starter test
 tests/rendered-html.test.mjs
+
+# Local re-encode sources for scripts/build-media.sh (the shipped masters are derived from these)
+/media-src/

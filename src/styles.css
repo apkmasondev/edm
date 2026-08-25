@@ -7,8 +7,12 @@
   --blue: #4c7dff;
   --violet: #8e54ff;
   --magenta: #ff3bc8;
-  --progress: 0;
 }
+
+/* The scroll loop writes --progress, --light-x, --motion-blur and --sigil-* sixty times a second.
+   They are set on the single element that reads each one, never on .experience: an inherited custom
+   property written on the stage invalidates style for the entire subtree below it — every HUD chip,
+   every copy beat, all eighteen artists — on every frame. */
 
 * { box-sizing: border-box; }
 
@@ -51,20 +55,19 @@ body {
 }
 
 .video-stack { z-index: 0; background: var(--black); }
+/* filter already forces its own render surface, so will-change would only pin memory for it. */
 .experience[data-motion-blur="true"] .video-stack {
   filter: blur(var(--motion-blur, 0px));
   transform: translateZ(0) scale(1.002);
-  will-change: filter;
 }
 .festival-film {
   object-fit: cover;
+  /* Centred at every breakpoint: the finale sigil is measured around the frame's centre, so any
+     object-position offset would have to be re-derived per act on a single continuous film. */
   object-position: center center;
-  opacity: 0;
   transform: translateZ(0) scale(1.001);
-  will-change: opacity;
   pointer-events: none;
 }
-.festival-film--1 { opacity: 1; }
 .static-poster { display: none; background: var(--poster-url) center / cover no-repeat; }
 
 /* A film that failed to decode: keep the composition intact on the static poster instead of
@@ -437,7 +440,7 @@ h2 { font-size: clamp(50px, 6.25vw, 108px); }
 .stage-chip[data-active="true"] i { background: var(--cyan); box-shadow: 0 0 12px var(--cyan); transform: scaleX(1.18); }
 
 .lineup-viewport { left: auto; right: 3.2vw; bottom: max(103px, 11.5vh); width: min(49vw, 720px); overflow: hidden; pointer-events: none; }
-.lineup-viewport > div { width: 100%; will-change: transform; }
+.lineup-viewport > div { width: 100%; }
 .stage-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(18px, 2.3vw, 42px); }
 .stage-column { min-width: 0; }
 .stage-name { display: flex; gap: 9px; align-items: center; margin: 0 0 13px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,.18); color: var(--cyan); font-size: clamp(8px, .66vw, 10px); font-weight: 700; letter-spacing: .16em; white-space: nowrap; }
@@ -555,7 +558,7 @@ h2 { font-size: clamp(50px, 6.25vw, 108px); }
 .timeline { position: relative; height: 1px; background: rgba(255,255,255,.2); }
 .timeline i { position: absolute; left: 33.3%; top: -2px; width: 1px; height: 5px; background: rgba(255,255,255,.38); box-shadow: 136px 0 rgba(255,255,255,.38); }
 /* scaleX rather than width: the gradient compresses identically, without a layout pass per frame. */
-.timeline b { display: block; width: 100%; height: 1px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta)); box-shadow: 0 0 10px rgba(23,231,255,.65); transform: scaleX(var(--progress)); transform-origin: left; will-change: transform; }
+.timeline b { display: block; width: 100%; height: 1px; background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta)); box-shadow: 0 0 10px rgba(23,231,255,.65); transform: scaleX(var(--progress, 0)); transform-origin: left; will-change: transform; }
 .timeline-numbers { display: flex; justify-content: space-between; color: rgba(255,255,255,.7); font-size: 7px; letter-spacing: .12em; }
 .reduced-lineup { display: none; }
 
@@ -569,10 +572,15 @@ h2 { font-size: clamp(50px, 6.25vw, 108px); }
 
 @media (max-width: 900px) {
   .vignette { background: linear-gradient(180deg, rgba(3,3,7,.5) 0%, transparent 24%, transparent 52%, rgba(3,3,7,.88) 83%, rgba(3,3,7,.98) 100%); }
-  .festival-film--3 { object-position: 52% center; }
   .top-hud { padding-left: 22px; padding-right: 22px; grid-template-columns: 1fr auto; }
   .fiction-pill { display: none; }
   .sound-toggle { padding: 7px 13px 7px 11px; gap: 8px; }
+  /* A backdrop blur samples whatever is behind it, and behind these chips is a film that changes on
+     every scrubbed frame — so the blur is re-run per frame on the device least able to afford it.
+     A denser glass body reads the same at this size and costs nothing. */
+  .sound-toggle, .festival-mode, .replay-button i { backdrop-filter: none; }
+  .sound-toggle, .festival-mode { background: linear-gradient(135deg, rgba(23,231,255,.13), rgba(3,3,7,.5) 44%, rgba(255,59,200,.12)), rgba(7,7,16,.86); }
+  .replay-button i { background: linear-gradient(140deg, rgba(23,231,255,.12), rgba(3,3,7,.5) 50%, rgba(142,84,255,.12)), rgba(7,7,16,.84); }
   .copy-safe-area { left: 22px; right: 22px; bottom: max(88px, 10.5vh); width: auto; }
   .copy-beat--intro { bottom: -2vh; }
   h1 { font-size: clamp(48px, 15vw, 78px); }

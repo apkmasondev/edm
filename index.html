@@ -17,6 +17,9 @@
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <!-- The film's poster is the first thing on screen and the only render-blocking-adjacent image
+         the experience has; the master itself is fetched by the <video> element's own preload. -->
+    <link rel="preload" as="image" href="%BASE_URL%reference/01_opening_logo.webp" fetchpriority="high" />
     <title>APKMASON EDM Music Festival — Interactive Design Fiction</title>
   </head>
   <body>
